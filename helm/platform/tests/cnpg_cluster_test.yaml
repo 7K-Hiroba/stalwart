@@ -21,6 +21,12 @@ tests:
       - equal:
           path: apiVersion
           value: postgresql.cnpg.io/v1
+      - equal:
+          path: spec.bootstrap.initdb.database
+          value: stalwart
+      - equal:
+          path: spec.bootstrap.initdb.owner
+          value: stalwart
 
   - it: uses configured instances and storage
     set:

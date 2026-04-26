@@ -10,6 +10,13 @@ tests:
           path: apiVersion
           value: gateway.networking.k8s.io/v1
 
+  - it: is not rendered when gateway is disabled
+    set:
+      gateway.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
   - it: sets parent gateway reference
     set:
       gateway.parentRefs:
@@ -26,17 +33,17 @@ tests:
   - it: sets hostnames
     set:
       gateway.hostnames:
-        - app.example.com
-        - www.example.com
+        - mail.example.com
+        - jmap.example.com
     asserts:
       - equal:
           path: spec.hostnames[0]
-          value: "app.example.com"
+          value: "mail.example.com"
       - equal:
           path: spec.hostnames[1]
-          value: "www.example.com"
+          value: "jmap.example.com"
 
-  - it: renders catch-all rule when no custom rules
+  - it: renders catch-all rule pointing at the http port
     set:
       gateway.rules: []
     asserts:
@@ -46,3 +53,14 @@ tests:
       - equal:
           path: spec.rules[0].matches[0].path.value
           value: /
+      - equal:
+          path: spec.rules[0].backendRefs[0].port
+          value: 8080
+
+  - it: tracks a custom http port number on the backendRef
+    set:
+      service.ports.http: 9000
+    asserts:
+      - equal:
+          path: spec.rules[0].backendRefs[0].port
+          value: 9000

@@ -12,12 +12,12 @@ tests:
 
   - it: uses the correct image
     set:
-      image.repository: ghcr.io/example/app
-      image.tag: "1.2.3"
+      image.repository: ghcr.io/example/stalwart
+      image.tag: "v0.99.0"
     asserts:
       - equal:
           path: spec.template.spec.containers[0].image
-          value: "ghcr.io/example/app:1.2.3"
+          value: "ghcr.io/example/stalwart:v0.99.0"
 
   - it: falls back to appVersion when tag is empty
     set:
@@ -25,7 +25,7 @@ tests:
     asserts:
       - matchRegex:
           path: spec.template.spec.containers[0].image
-          pattern: ":0\\.1\\.0$"
+          pattern: ":0\\.16\\.1$"
 
   - it: omits replicas when autoscaling is enabled
     set:
@@ -34,14 +34,23 @@ tests:
       - isNull:
           path: spec.replicas
 
-  - it: applies pod security context
+  - it: defaults to Recreate strategy
+    asserts:
+      - equal:
+          path: spec.strategy.type
+          value: Recreate
+
+  - it: applies pod security context with stalwart UID 2000
     asserts:
       - equal:
           path: spec.template.spec.securityContext.runAsNonRoot
           value: true
       - equal:
           path: spec.template.spec.securityContext.runAsUser
-          value: 1000
+          value: 2000
+      - equal:
+          path: spec.template.spec.securityContext.fsGroup
+          value: 2000
 
   - it: applies container security context
     asserts:
@@ -62,13 +71,67 @@ tests:
       - isNotNull:
           path: spec.template.spec.containers[0].resources.requests
 
-  - it: sets container port from service.targetPort
-    set:
-      service.targetPort: 3000
+  - it: exposes all stalwart ports
     asserts:
-      - equal:
-          path: spec.template.spec.containers[0].ports[0].containerPort
-          value: 3000
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: http
+            containerPort: 8080
+            protocol: TCP
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: smtp
+            containerPort: 25
+            protocol: TCP
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: imaps
+            containerPort: 993
+            protocol: TCP
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: sieve
+            containerPort: 4190
+            protocol: TCP
+
+  - it: mounts config and data volumes by default
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: config
+            mountPath: /etc/stalwart
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: data
+            mountPath: /var/lib/stalwart
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: config
+            persistentVolumeClaim:
+              claimName: RELEASE-NAME-stalwart-config
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: data
+            persistentVolumeClaim:
+              claimName: RELEASE-NAME-stalwart-data
+
+  - it: skips persistent volumes when persistence is disabled
+    set:
+      persistence.config.enabled: false
+      persistence.data.enabled: false
+    asserts:
+      - isNull:
+          path: spec.template.spec.volumes
+      - isNull:
+          path: spec.template.spec.containers[0].volumeMounts
 
   - it: renders env vars when set
     set:
@@ -82,7 +145,19 @@ tests:
             name: FOO
             value: bar
 
-  - it: renders extra volumes and mounts
+  - it: renders envFrom for secret injection
+    set:
+      envFrom:
+        - secretRef:
+            name: stalwart-creds
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].envFrom
+          content:
+            secretRef:
+              name: stalwart-creds
+
+  - it: appends extra volumes and mounts
     set:
       extraVolumes:
         - name: tmp
@@ -108,5 +183,17 @@ tests:
         prometheus.io/scrape: "true"
     asserts:
       - equal:
-          path: spec.template.metadata.annotations.prometheus\.io/scrape
+          path: spec.template.metadata.annotations["prometheus.io/scrape"]
           value: "true"
+
+  - it: probes hit the http port on healthz endpoints
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.path
+          value: /healthz/live
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.port
+          value: http
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /healthz/ready

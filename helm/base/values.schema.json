@@ -44,6 +44,7 @@
       "properties": {
         "runAsNonRoot": { "type": "boolean" },
         "runAsUser": { "type": "integer" },
+        "runAsGroup": { "type": "integer" },
         "fsGroup": { "type": "integer" }
       }
     },
@@ -67,13 +68,37 @@
         }
       }
     },
+    "strategy": {
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["RollingUpdate", "Recreate"] },
+        "rollingUpdate": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
     "service": {
       "type": "object",
-      "required": ["port"],
+      "required": ["ports"],
       "properties": {
         "type": { "type": "string", "enum": ["ClusterIP", "NodePort", "LoadBalancer"] },
-        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
-        "targetPort": { "type": "integer", "minimum": 1, "maximum": 65535 }
+        "externalTrafficPolicy": { "type": "string", "enum": ["", "Local", "Cluster"] },
+        "annotations": { "type": "object" },
+        "ports": {
+          "type": "object",
+          "required": ["http"],
+          "properties": {
+            "http": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "smtp": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "submission": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "submissions": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "imap": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "imaps": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "pop3": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "pop3s": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "sieve": { "type": "integer", "minimum": 1, "maximum": 65535 }
+          },
+          "additionalProperties": { "type": "integer", "minimum": 1, "maximum": 65535 }
+        }
       },
       "additionalProperties": false
     },
@@ -133,7 +158,8 @@
           }
         },
         "initialDelaySeconds": { "type": "integer", "minimum": 0 },
-        "periodSeconds": { "type": "integer", "minimum": 1 }
+        "periodSeconds": { "type": "integer", "minimum": 1 },
+        "timeoutSeconds": { "type": "integer", "minimum": 1 }
       }
     },
     "readinessProbe": {
@@ -147,7 +173,8 @@
           }
         },
         "initialDelaySeconds": { "type": "integer", "minimum": 0 },
-        "periodSeconds": { "type": "integer", "minimum": 1 }
+        "periodSeconds": { "type": "integer", "minimum": 1 },
+        "timeoutSeconds": { "type": "integer", "minimum": 1 }
       }
     },
     "autoscaling": {
@@ -169,12 +196,34 @@
       },
       "additionalProperties": false
     },
+    "persistence": {
+      "type": "object",
+      "properties": {
+        "config": { "$ref": "#/definitions/pvc" },
+        "data": { "$ref": "#/definitions/pvc" }
+      },
+      "additionalProperties": false
+    },
     "nodeSelector": { "type": "object" },
     "tolerations": { "type": "array" },
     "affinity": { "type": "object" },
     "env": { "type": "array" },
+    "envFrom": { "type": "array" },
     "extraVolumes": { "type": "array" },
     "extraVolumeMounts": { "type": "array" }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "definitions": {
+    "pvc": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "size": { "type": "string", "pattern": "^[0-9]+(Mi|Gi|Ti)$" },
+        "storageClass": { "type": "string" },
+        "accessMode": { "type": "string", "enum": ["ReadWriteOnce", "ReadWriteMany", "ReadOnlyMany"] },
+        "annotations": { "type": "object" }
+      },
+      "additionalProperties": false
+    }
+  }
 }

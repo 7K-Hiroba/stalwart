@@ -16,7 +16,7 @@ spec:
       helm:
         valueFiles:
           - values.yaml
-          # - values-production.yaml  # Uncomment for env-specific overrides
+          
     - repoURL: https://github.com/7K-Hiroba/stalwart.git
       targetRevision: main
       path: helm/platform

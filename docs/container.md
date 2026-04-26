@@ -4,45 +4,49 @@ sidebar_position: 2
 
 # Container image
 
-The application ships as an OCI image built from the root [`Dockerfile`](https://github.com/7KGroup/stalwart/blob/main/Dockerfile). The scaffolded template uses a two-stage build (builder + distroless runtime); adjust the build stage to match your language and toolchain.
+Stalwart ships an [official multi-arch container image](https://github.com/stalwartlabs/stalwart/pkgs/container/stalwart) maintained by the upstream project. Following Hiroba's [near-native philosophy](https://hiroba.7kgroup.org/docs/architecture/near-native), this app does **not** maintain its own Dockerfile — the Helm chart consumes the upstream image directly.
 
-## Build stages
+| | |
+|---|---|
+| Registry | `docker.io/stalwartlabs/stalwart` (mirror: `ghcr.io/stalwartlabs/stalwart`) |
+| Default tag | pinned via `Chart.appVersion` (currently `0.16.1`) |
+| Base | `debian:trixie-slim` |
+| User | `stalwart` (UID/GID `2000`) |
+| Build features | `sqlite postgres mysql rocks s3 redis azure nats enterprise` |
 
-The template's Dockerfile has two stages:
+## Why no custom image
 
-- **Builder** — pulls dependencies and compiles the application. Replace the base image (`node:20-alpine` by default) and commands with whatever your stack needs.
-- **Runtime** — copies only the compiled artefacts into a distroless image (`gcr.io/distroless/nodejs20-debian12:nonroot`). The runtime has no shell, no package manager, and runs as a non-root user.
+The upstream image is well-maintained, signed with Cosign, and built for both `linux/amd64` and `linux/arm64`. Adding a wrapper Dockerfile would mean:
 
-## Build locally
+- Tracking upstream releases ourselves
+- Re-running their multi-arch build matrix
+- Drifting from upstream's security baseline (`setcap cap_net_bind_service`, non-root `stalwart` user)
 
-```bash
-docker build -t ghcr.io/7k-hiroba/stalwart:dev .
-docker run --rm -p 8080:8080 ghcr.io/7k-hiroba/stalwart:dev
+…with no Hiroba-specific value to add. If you need a custom build (e.g. additional features compiled in), fork upstream's `Dockerfile` rather than overriding through this repo.
+
+## Pinning a different tag
+
+Override `image.tag` in the base chart values:
+
+```yaml
+image:
+  repository: docker.io/stalwartlabs/stalwart
+  tag: "v0.16.1"
 ```
 
-## Image labels
-
-Labels are populated from the template at scaffold time:
-
-| Label                                           | Value                                                    |
-| ----------------------------------------------- | -------------------------------------------------------- |
-| `maintainer`                                    | `7KGroup <https://github.com/7KGroup>`                   |
-| `org.opencontainers.image.source`               | `https://github.com/7KGroup/stalwart`          |
-| `org.opencontainers.image.description`          | `Stalwart`                              |
-
-<!-- TODO: Add more OCI labels (version, revision, created) once your CI wiring is in place. -->
-
-## Publishing
-
-Images are built and published by the CI workflows under `.github/workflows/`, which reference the centralized [workflow-library](https://github.com/7K-Hiroba/workflows-library). The default target is `ghcr.io/7k-hiroba/stalwart`.
+Leave `tag` empty to track `Chart.appVersion`.
 
 ## Runtime expectations
 
-The Helm base chart assumes:
+The Helm base chart assumes the upstream image's contract:
 
-- Container listens on port `8080` (override `service.targetPort` if yours differs)
-- Process runs as UID `1000` (distroless `nonroot` matches this)
-- Root filesystem is read-only — write to `/tmp` or a mounted volume only
-- Health endpoints at `/healthz` (liveness) and `/readyz` (readiness)
+| Surface | Value |
+|---|---|
+| Liveness/readiness | `GET /healthz/live` and `/healthz/ready` on port `8080` |
+| Config directory | `/etc/stalwart` (mounted from the `config` PVC) |
+| Data directory | `/var/lib/stalwart` (mounted from the `data` PVC) |
+| Read-only root FS | yes — Stalwart writes only to the mounted volumes |
+| Privileged ports | bound by the binary via `cap_net_bind_service`, no Linux capabilities are added to the container |
+| Exposed ports | `8080` (HTTP), `25/587/465` (SMTP family), `143/993` (IMAP), `110/995` (POP3), `4190` (ManageSieve) |
 
-<!-- TODO: Document any other runtime expectations your app imposes (env vars, mount points, signals). -->
+If a future Stalwart release changes any of these, update the base chart's probes, port map, or volume mounts to match — don't paper over it with a custom image.

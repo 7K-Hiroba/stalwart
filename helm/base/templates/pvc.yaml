@@ -1,0 +1,29 @@
+{{- $first := true }}
+{{- range $name, $cfg := .Values.persistence }}
+{{- if $cfg.enabled }}
+{{- if not $first }}
+---
+{{- end }}
+{{- $first = false }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "app.fullname" $ }}-{{ $name }}
+  labels:
+    {{- include "app.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+  {{- with $cfg.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  accessModes:
+    - {{ $cfg.accessMode }}
+  resources:
+    requests:
+      storage: {{ $cfg.size }}
+  {{- if $cfg.storageClass }}
+  storageClassName: {{ $cfg.storageClass }}
+  {{- end }}
+{{- end }}
+{{- end }}
