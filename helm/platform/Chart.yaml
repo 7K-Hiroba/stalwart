@@ -1,0 +1,28 @@
+apiVersion: v2
+name: stalwart-platform
+description: Platform dependencies for stalwart — provisions databases, storage, and identity resources
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+maintainers:
+  - name: 7k-hiroba
+keywords:
+  - platform
+  - crossplane
+  - cnpg
+  - hiroba
+home: https://github.com/7K-Hiroba/stalwart
+sources:
+  - https://github.com/7K-Hiroba/stalwart
+annotations:
+  artifacthub.io/category: monitoring-logging
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/links: |
+    - name: documentation
+      url: https://hiroba.7kgroup.org/docs/apps/stalwart/helm-platform
+    - name: source
+      url: https://github.com/7K-Hiroba/stalwart
+    - name: support
+      url: https://github.com/7K-Hiroba/stalwart/issues
+  artifacthub.io/maintainers: |
+    - name: 7k-hiroba

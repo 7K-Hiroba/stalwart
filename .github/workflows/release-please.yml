@@ -1,0 +1,116 @@
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      app--release_created: ${{ steps.release.outputs['app--release_created'] }}
+      app--tag_name: ${{ steps.release.outputs['app--tag_name'] }}
+      app--version: ${{ steps.release.outputs['app--version'] }}
+      helm-base--release_created: ${{ steps.release.outputs['helm/base--release_created'] }}
+      helm-base--tag_name: ${{ steps.release.outputs['helm/base--tag_name'] }}
+      helm-base--version: ${{ steps.release.outputs['helm/base--version'] }}
+      helm-platform--release_created: ${{ steps.release.outputs['helm/platform--release_created'] }}
+      helm-platform--tag_name: ${{ steps.release.outputs['helm/platform--tag_name'] }}
+      helm-platform--version: ${{ steps.release.outputs['helm/platform--version'] }}
+      docs--release_created: ${{ steps.release.outputs['docs--release_created'] }}
+      docs--tag_name: ${{ steps.release.outputs['docs--tag_name'] }}
+      docs--version: ${{ steps.release.outputs['docs--version'] }}
+      crossplane--release_created: ${{ steps.release.outputs['crossplane--release_created'] }}
+      crossplane--tag_name: ${{ steps.release.outputs['crossplane--tag_name'] }}
+      crossplane--version: ${{ steps.release.outputs['crossplane--version'] }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-app:
+    needs: release-please
+    if: needs.release-please.outputs.app--release_created == 'true'
+    uses: 7K-Hiroba/workflows-library/.github/workflows/release-app.yml@v1
+    with:
+      image-name: stalwart
+      path: .
+      version: ${{ needs.release-please.outputs.app--version }}
+    secrets: inherit
+
+  publish-helm-base:
+    needs: release-please
+    if: needs.release-please.outputs.helm-base--release_created == 'true'
+    uses: 7K-Hiroba/workflows-library/.github/workflows/release-helm.yml@v1
+    with:
+      path: helm/base
+      version: ${{ needs.release-please.outputs.helm-base--version }}
+    secrets: inherit
+
+  publish-helm-platform:
+    needs: release-please
+    if: needs.release-please.outputs.helm-platform--release_created == 'true'
+    uses: 7K-Hiroba/workflows-library/.github/workflows/release-helm.yml@v1
+    with:
+      path: helm/platform
+      version: ${{ needs.release-please.outputs.helm-platform--version }}
+    secrets: inherit
+
+  publish-docs:
+    needs: release-please
+    if: needs.release-please.outputs.docs--release_created == 'true'
+    uses: 7K-Hiroba/workflows-library/.github/workflows/release-docs.yml@v1
+    with:
+      path: docs
+      version: ${{ needs.release-please.outputs.docs--version }}
+    secrets: inherit
+
+  publish-crossplane:
+    needs: release-please
+    if: needs.release-please.outputs.crossplane--release_created == 'true'
+    uses: 7K-Hiroba/workflows-library/.github/workflows/release-crossplane.yml@v1
+    with:
+      path: crossplane
+      version: ${{ needs.release-please.outputs.crossplane--version }}
+    secrets: inherit
+
+  detect-artifacthub-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      base: ${{ steps.filter.outputs.base }}
+      platform: ${{ steps.filter.outputs.platform }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            base:
+              - 'helm/base-artifacthub-repo.yml'
+            platform:
+              - 'helm/platform-artifacthub-repo.yml'
+
+  publish-artifacthub-base:
+    needs: detect-artifacthub-changes
+    if: needs.detect-artifacthub-changes.outputs.base == 'true'
+    uses: 7K-Hiroba/workflows-library/.github/workflows/release-artifacthub-metadata.yml@v1
+    with:
+      file: helm/base-artifacthub-repo.yml
+      chart: stalwart
+    secrets: inherit
+
+  publish-artifacthub-platform:
+    needs: detect-artifacthub-changes
+    if: needs.detect-artifacthub-changes.outputs.platform == 'true'
+    uses: 7K-Hiroba/workflows-library/.github/workflows/release-artifacthub-metadata.yml@v1
+    with:
+      file: helm/platform-artifacthub-repo.yml
+      chart: stalwart-platform
+    secrets: inherit
+

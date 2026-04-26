@@ -1,0 +1,37 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: stalwart
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: hiroba
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: https://github.com/7K-Hiroba/stalwart.git
+      targetRevision: main
+      path: helm/base
+      helm:
+        valueFiles:
+          - values.yaml
+          # - values-production.yaml  # Uncomment for env-specific overrides
+    - repoURL: https://github.com/7K-Hiroba/stalwart.git
+      targetRevision: main
+      path: helm/platform
+      helm:
+        valueFiles:
+          - values.yaml
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: stalwart
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

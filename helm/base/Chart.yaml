@@ -1,0 +1,25 @@
+apiVersion: v2
+name: stalwart
+description: Helm chart for stalwart
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+maintainers:
+  - name: 7k-hiroba
+keywords:
+  - kubernetes
+  - hiroba
+home: https://github.com/7K-Hiroba/stalwart
+sources:
+  - https://github.com/7K-Hiroba/stalwart
+annotations:
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/links: |
+    - name: documentation
+      url: https://hiroba.7kgroup.org/docs/apps/stalwart/helm-base
+    - name: source
+      url: https://github.com/7K-Hiroba/stalwart
+    - name: support
+      url: https://github.com/7K-Hiroba/stalwart/issues
+  artifacthub.io/maintainers: |
+    - name: 7k-hiroba

@@ -1,0 +1,11 @@
+{{- if .Values.observability.prometheusRules.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "platform.name" . }}
+  labels:
+    {{- include "platform.labels" . | nindent 4 }}
+spec:
+  groups:
+    {{- tpl (toYaml .Values.observability.prometheusRules.groups) . | nindent 4 }}
+{{- end }}

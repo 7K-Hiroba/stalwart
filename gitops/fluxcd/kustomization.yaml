@@ -1,0 +1,28 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: stalwart
+  namespace: flux-system
+  labels:
+    app.kubernetes.io/part-of: hiroba
+spec:
+  interval: 10m
+  targetNamespace: stalwart
+  sourceRef:
+    kind: GitRepository
+    name: stalwart
+  path: ./helm/base
+  prune: true
+  wait: true
+  timeout: 5m
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: stalwart
+  namespace: flux-system
+spec:
+  interval: 5m
+  url: https://github.com/7K-Hiroba/stalwart.git
+  ref:
+    branch: main

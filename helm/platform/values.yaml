@@ -1,0 +1,164 @@
+# Platform chart examples for stalwart
+# These are example resource definitions managed by cluster operators (CNPG, Crossplane, etc.).
+# Add, remove, or customise them to match your application's needs.
+#
+# Each resource supports a `provider` switch to select the backend implementation.
+# Available providers are listed per resource — add your own by creating a
+# matching template file in templates/<category>/<resource>-<provider>.yaml
+#
+# Templates are organized into subdirectories:
+#   database/    — Database resources (CNPG, etc.)
+#   storage/     — Object storage (Crossplane, Garage, etc.)
+#   secrets/     — External secrets management
+#   observability/ — ServiceMonitors, Grafana dashboards, PrometheusRules
+
+global:
+  # -- Application name, used as prefix for all platform resources
+  appName: stalwart
+  # -- Release name of the base chart deployment. When set, the ServiceMonitor
+  # selector matches `app.kubernetes.io/instance: <baseInstance>` so multiple
+  # releases of the same app coexist safely. Leave empty to match by name only.
+  baseInstance: ""
+
+# -- PostgreSQL database
+postgres:
+  enabled: true
+  # -- Provider: "cnpg" (CloudNativePG operator)
+  provider: cnpg
+  instances: 1
+  storage:
+    size: 10Gi
+    storageClass: ""
+  resources:
+    limits:
+      cpu: "1"
+      memory: 1Gi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+  # -- PostgreSQL version
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.2
+  # -- Database name to create
+  database: app
+  # -- Database owner
+  owner: app
+  # -- Backup configuration (optional)
+  backup:
+    enabled: false
+    schedule: "0 2 * * *"
+    retentionPolicy: "7d"
+
+# -- S3-compatible object storage
+s3:
+  enabled: false
+  # -- Provider: "crossplane" | "garage"
+  provider: crossplane
+  # -- Bucket name (will be prefixed with app name)
+  bucketName: assets
+  # -- Access control
+  acl: private
+
+  # -- Crossplane-specific settings (provider: crossplane)
+  crossplane:
+    region: us-east-1
+    providerConfigRef: aws-provider
+    lifecycle:
+      enabled: false
+      expirationDays: 90
+
+  # -- Garage-specific settings (provider: garage)
+  garage:
+    # -- Garage API endpoint
+    endpoint: "http://garage.garage.svc.cluster.local:3900"
+    # -- Garage access key Secret reference
+    accessKeySecret:
+      name: ""
+      key: accessKey
+    # -- Garage secret key Secret reference
+    secretKeySecret:
+      name: ""
+      key: secretKey
+    # -- Number of data/parity replicas in Garage
+    replicationFactor: 3
+
+# -- External Secrets (external-secrets.io)
+externalSecrets:
+  enabled: false
+  # -- How often to sync secrets
+  refreshInterval: 1h
+  # -- SecretStore or ClusterSecretStore reference
+  storeRef:
+    name: cluster-secret-store
+    kind: ClusterSecretStore
+  # -- Individual secret mappings
+  data: []
+  #  - secretKey: DATABASE_URL
+  #    remoteKey: myapp/database
+  #    property: url
+  #  - secretKey: API_KEY
+  #    remoteKey: myapp/api
+  #    property: key
+  # -- Pull all keys from a remote path
+  dataFrom: []
+  #  - extract:
+  #      key: myapp/config
+  # -- Optional target Secret template for value transformation.
+  # See https://external-secrets.io/latest/guides/templating/
+  target:
+    template: {}
+    # type: Opaque
+    # data:
+    #   DATABASE_URL: "postgres://{{ `{{ .username }}` }}:{{ `{{ .password }}` }}@host/{{ `{{ .database }}` }}"
+
+# -- Observability resources
+observability:
+  # -- Prometheus ServiceMonitor
+  serviceMonitor:
+    enabled: false
+    # -- Additional labels for ServiceMonitor discovery (e.g., release: kube-prometheus-stack)
+    additionalLabels: {}
+    # -- Service port name to scrape
+    port: http
+    # -- Metrics endpoint path
+    path: /metrics
+    # -- Scrape interval
+    interval: 30s
+    # -- Scrape timeout
+    scrapeTimeout: 10s
+
+  # -- Grafana dashboard (deployed as ConfigMap with sidecar label)
+  grafanaDashboard:
+    enabled: false
+    # -- Grafana folder label
+    folderLabel: ""
+
+  # -- PrometheusRule alerts. `groups` is passed through `tpl` so values can
+  # reference `.Release.Namespace`, `include "platform.name" .`, etc. Override
+  # entirely to replace the defaults, or append to extend them.
+  prometheusRules:
+    enabled: false
+    groups:
+      - name: '{{ include "platform.name" . }}.rules'
+        rules:
+          - alert: HighErrorRate
+            expr: |
+              sum(rate(http_requests_total{namespace="{{ .Release.Namespace }}", service="{{ include "platform.name" . }}", status=~"5.."}[5m]))
+              /
+              sum(rate(http_requests_total{namespace="{{ .Release.Namespace }}", service="{{ include "platform.name" . }}"}[5m]))
+              > 0.05
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: 'High error rate for {{ include "platform.name" . }}'
+              description: "Error rate is above 5% for the last 5 minutes."
+          - alert: HighLatency
+            expr: |
+              histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{namespace="{{ .Release.Namespace }}", service="{{ include "platform.name" . }}"}[5m]))
+              > 1
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: 'High p99 latency for {{ include "platform.name" . }}'
+              description: "p99 latency is above 1 second for the last 5 minutes."
