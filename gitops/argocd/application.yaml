@@ -20,9 +20,6 @@ spec:
           # Test overrides — keep the deploy self-contained so we can
           # validate the chart without needing a parent Gateway, internet
           # mail exposure, or large PVCs.
-          image:
-            # Stalwart's upstream tags carry a `v` prefix
-            tag: "v0.16.1"
           gateway:
             enabled: false
           service:
