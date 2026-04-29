@@ -128,10 +128,28 @@ tests:
       persistence.config.enabled: false
       persistence.data.enabled: false
     asserts:
-      - isNull:
+      - notContains:
           path: spec.template.spec.volumes
-      - isNull:
+          content:
+            name: config
+            persistentVolumeClaim:
+              claimName: RELEASE-NAME-stalwart-config
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: data
+            persistentVolumeClaim:
+              claimName: RELEASE-NAME-stalwart-data
+      - notContains:
           path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: config
+            mountPath: /etc/stalwart
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: data
+            mountPath: /var/lib/stalwart
 
   - it: renders env vars when set
     set:
