@@ -36,12 +36,12 @@ helm install stalwart-platform ./helm/platform \
 
 Provisions a PostgreSQL cluster via [CloudNativePG](https://cloudnative-pg.io/). Stalwart uses it as the **data store backend** — account metadata, mailbox state, ACLs, sessions. Without it Stalwart falls back to RocksDB on the data PVC, which is fine for small homelab installs but doesn't scale to multiple replicas.
 
-### Prerequisites
+### PostgreSQL prerequisites
 
 - CloudNativePG operator installed in the cluster
 - A `StorageClass` available for the data volume
 
-### Configuration
+### PostgreSQL configuration
 
 ```yaml
 postgres:
@@ -71,7 +71,7 @@ Provisions an S3-compatible bucket. Stalwart uses it as the **blob store backend
 - **`crossplane`** — provisions a real bucket on AWS (or an S3-compatible cloud) via Crossplane's S3 provider
 - **`garage`** — creates a bucket on an in-cluster [Garage](https://garagehq.deuxfleurs.fr/) deployment (homelab-friendly)
 
-### Configuration
+### S3 configuration
 
 ```yaml
 s3:
@@ -94,12 +94,12 @@ You'll still need to point Stalwart's blob store at the bucket. The simplest pat
 
 Populates a Kubernetes `Secret` from an upstream store (Vault, AWS Secrets Manager, 1Password, etc.) via an `ExternalSecret` resource. The base chart's `envFrom` then pulls credentials from this `Secret`.
 
-### Prerequisites
+### ExternalSecrets prerequisites
 
 - [external-secrets operator](https://external-secrets.io/) installed in the cluster
 - A `ClusterSecretStore` (or `SecretStore`) configured and reachable
 
-### Configuration
+### ExternalSecrets configuration
 
 ```yaml
 externalSecrets:
@@ -145,7 +145,7 @@ externalSecrets:
         STALWART_STORE_DB_URL: "postgres://{{ `{{ .username }}` }}:{{ `{{ .password }}` }}@host/stalwart"
 ```
 
-The double-brace escape (`{{ ` ... ` }}`) is needed because Helm processes the values file first; the inner braces reach ESO untouched.
+The double-brace escape (`` `{{ `` ... `` }}` ``) is needed because Helm processes the values file first; the inner braces reach ESO untouched.
 
 ### Wiring back into the base chart
 

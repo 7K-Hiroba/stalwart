@@ -172,3 +172,19 @@ The scope in the commit message should match the component path or name. Release
 - ServiceMonitor for Prometheus scraping (requires prometheus-operator)
 - Grafana dashboards deployed as ConfigMaps with `grafana_dashboard: "1"` label (sidecar discovery)
 - PrometheusRules for alerting (error rate, latency)
+
+## Markdown Linting
+
+CI runs [markdownlint-cli2](https://github.com/DavidAnson/markdownlint-cli2) on every pull request. Any violation fails the build.
+
+**After creating or editing any `.md` file, you must run the linter before committing:**
+
+```bash
+npx markdownlint-cli2 "**/*.md"
+```
+
+- Rules are configured in `.markdownlint.yaml` at the repository root.
+- Fix every reported error. Do not disable rules inline or in config to silence warnings — fix the underlying markup instead.
+- Common issues: fenced code blocks without a language tag (MD040), table separator rows missing spaces around pipes (MD060), missing blank lines before/after lists and headings (MD032, MD022), and duplicate heading text across sections (MD024).
+- If you add a new Markdown file, ensure it starts with a top-level `# Heading` (MD041).
+- Run the linter again after making fixes to confirm zero errors before committing.

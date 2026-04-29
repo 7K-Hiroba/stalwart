@@ -27,17 +27,17 @@ kubectl logs deploy/stalwart | grep -i password
 
 Stalwart serves two distinct families of traffic. The chart exposes both on a single multi-port `Service` so the in-cluster surface stays uniform; the `HTTPRoute` only attaches to the HTTP port.
 
-| Port name     | Port  | Protocol     | What it carries                          |
-|---------------|------:|--------------|------------------------------------------|
-| `http`        | 8080  | HTTP         | Admin UI, JMAP, CalDAV, CardDAV, WebDAV, `/healthz`, `/metrics` |
-| `smtp`        | 25    | SMTP         | Inbound mail from other servers           |
-| `submission`  | 587   | SMTP+STARTTLS | Authenticated client submission           |
-| `submissions` | 465   | SMTPS        | Implicit-TLS client submission            |
-| `imap`        | 143   | IMAP+STARTTLS | Mail client retrieval                     |
-| `imaps`       | 993   | IMAPS        | Implicit-TLS IMAP                         |
-| `pop3`        | 110   | POP3+STARTTLS | Mail client retrieval (legacy)            |
-| `pop3s`       | 995   | POP3S        | Implicit-TLS POP3                         |
-| `sieve`       | 4190  | ManageSieve  | Sieve filter script management            |
+| Port name     | Port | Protocol      | What it carries                                                          |
+|---------------|-----:|---------------|--------------------------------------------------------------------------|
+| `http`        | 8080 | HTTP          | Admin UI, JMAP, CalDAV, CardDAV, WebDAV, `/healthz`, `/metrics`          |
+| `smtp`        |   25 | SMTP          | Inbound mail from other servers                                          |
+| `submission`  |  587 | SMTP+STARTTLS | Authenticated client submission                                          |
+| `submissions` |  465 | SMTPS         | Implicit-TLS client submission                                           |
+| `imap`        |  143 | IMAP+STARTTLS | Mail client retrieval                                                    |
+| `imaps`       |  993 | IMAPS         | Implicit-TLS IMAP                                                        |
+| `pop3`        |  110 | POP3+STARTTLS | Mail client retrieval (legacy)                                           |
+| `pop3s`       |  995 | POP3S         | Implicit-TLS POP3                                                        |
+| `sieve`       | 4190 | ManageSieve   | Sieve filter script management                                           |
 
 To remove a protocol you don't run, delete its key under `service.ports`. The container exposes everything; the Service decides what's reachable.
 
@@ -65,10 +65,10 @@ The HTTP port is also reachable through the Gateway, so you don't need the LoadB
 
 Stalwart needs persistent disks for both config and data. The chart provisions two PVCs:
 
-| Volume   | Mount                | Default size | What's in it                                    |
-|----------|----------------------|-------------:|--------------------------------------------------|
-| `config` | `/etc/stalwart`      | 1 Gi         | `config.json`, generated admin password, TLS material |
-| `data`   | `/var/lib/stalwart`  | 20 Gi        | Mailboxes, queue spool, embedded data/blob stores |
+| Volume   | Mount               | Default size | What's in it                                                  |
+|----------|---------------------|-------------:|---------------------------------------------------------------|
+| `config` | `/etc/stalwart`     |         1 Gi | `config.json`, generated admin password, TLS material         |
+| `data`   | `/var/lib/stalwart` |        20 Gi | Mailboxes, queue spool, embedded data/blob stores             |
 
 ```yaml
 persistence:

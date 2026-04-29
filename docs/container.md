@@ -7,7 +7,7 @@ sidebar_position: 2
 Stalwart ships an [official multi-arch container image](https://github.com/stalwartlabs/stalwart/pkgs/container/stalwart) maintained by the upstream project. Following Hiroba's [near-native philosophy](https://hiroba.7kgroup.org/docs/architecture/near-native), this app does **not** maintain its own Dockerfile — the Helm chart consumes the upstream image directly.
 
 | | |
-|---|---|
+| --- | --- |
 | Registry | `docker.io/stalwartlabs/stalwart` (mirror: `ghcr.io/stalwartlabs/stalwart`) |
 | Default tag | pinned via `Chart.appVersion` (currently `0.16.1`) |
 | Base | `debian:trixie-slim` |
@@ -41,7 +41,7 @@ Leave `tag` empty to track `Chart.appVersion`.
 The Helm base chart assumes the upstream image's contract:
 
 | Surface | Value |
-|---|---|
+| --- | --- |
 | Liveness/readiness | `GET /healthz/live` and `/healthz/ready` on port `8080` |
 | Config directory | `/etc/stalwart` (mounted from the `config` PVC) |
 | Data directory | `/var/lib/stalwart` (mounted from the `data` PVC) |
