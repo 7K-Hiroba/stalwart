@@ -12,7 +12,7 @@ Values reference: [`compositions/crossplane/`](https://github.com/7KGroup/stalwa
 
 ## Structure
 
-```
+```text
 compositions/crossplane/
 ├── xrd-<resource>.yaml           # CompositeResourceDefinition
 ├── composition-<resource>.yaml   # Composition (maps XRD to managed resources)

@@ -4,31 +4,99 @@ sidebar_position: 3
 
 # Helm base chart
 
-The base chart deploys the application itself: `Deployment`, `Service`, `ServiceAccount`, `HorizontalPodAutoscaler`, and a Gateway API `HTTPRoute`. It does **not** provision databases, secrets, or observability — see the [platform chart](./helm-platform.md) for those.
+The base chart deploys Stalwart itself: a `Deployment`, a multi-port `Service`, two PVCs (`config`, `data`), a `ServiceAccount`, an HPA scaffold, an optional `PodDisruptionBudget`, and a Gateway API `HTTPRoute` for the HTTP-based protocols. It does **not** provision databases, secrets, or observability — see the [platform chart](./helm-platform.md).
 
-Values reference: [`helm/base/values.yaml`](https://github.com/7KGroup/stalwart/blob/main/helm/base/values.yaml)
+Values reference: [`helm/base/values.yaml`](https://github.com/7K-Hiroba/stalwart/blob/main/helm/base/values.yaml)
 
 ## Install
 
 ```bash
 helm install stalwart ./helm/base \
-  --set gateway.hostnames[0]=stalwart.yourdomain.com
+  --set gateway.hostnames[0]=mail.example.com
 ```
+
+After install, port-forward the admin UI and complete the setup wizard:
+
+```bash
+kubectl port-forward svc/stalwart 8080:8080
+# capture the generated admin password from logs first:
+kubectl logs deploy/stalwart | grep -i password
+```
+
+## Ports
+
+Stalwart serves two distinct families of traffic. The chart exposes both on a single multi-port `Service` so the in-cluster surface stays uniform; the `HTTPRoute` only attaches to the HTTP port.
+
+| Port name     | Port | Protocol      | What it carries                                                          |
+|---------------|-----:|---------------|--------------------------------------------------------------------------|
+| `http`        | 8080 | HTTP          | Admin UI, JMAP, CalDAV, CardDAV, WebDAV, `/healthz`, `/metrics`          |
+| `smtp`        |   25 | SMTP          | Inbound mail from other servers                                          |
+| `submission`  |  587 | SMTP+STARTTLS | Authenticated client submission                                          |
+| `submissions` |  465 | SMTPS         | Implicit-TLS client submission                                           |
+| `imap`        |  143 | IMAP+STARTTLS | Mail client retrieval                                                    |
+| `imaps`       |  993 | IMAPS         | Implicit-TLS IMAP                                                        |
+| `pop3`        |  110 | POP3+STARTTLS | Mail client retrieval (legacy)                                           |
+| `pop3s`       |  995 | POP3S         | Implicit-TLS POP3                                                        |
+| `sieve`       | 4190 | ManageSieve   | Sieve filter script management                                           |
+
+To remove a protocol you don't run, delete its key under `service.ports`. The container exposes everything; the Service decides what's reachable.
+
+## Exposing mail to the internet
+
+The HTTPRoute handles HTTP only. Mail TCP ports need a Layer-4 path off the cluster. Two common options:
+
+### LoadBalancer service
+
+Set the Service to `LoadBalancer` and let your cluster's load balancer (MetalLB, cloud LB) front every port:
+
+```yaml
+service:
+  type: LoadBalancer
+  externalTrafficPolicy: Local   # preserves client source IPs for greylisting / abuse rules
+```
+
+### NodePort + external proxy
+
+For homelab setups without an LB, switch to `NodePort` and front the nodes with HAProxy or your edge router. Document the chosen NodePorts in your platform notes — Kubernetes assigns them dynamically by default.
+
+The HTTP port is also reachable through the Gateway, so you don't need the LoadBalancer to expose `8080`.
+
+## Persistence
+
+Stalwart needs persistent disks for both config and data. The chart provisions two PVCs:
+
+| Volume   | Mount               | Default size | What's in it                                                  |
+|----------|---------------------|-------------:|---------------------------------------------------------------|
+| `config` | `/etc/stalwart`     |         1 Gi | `config.json`, generated admin password, TLS material         |
+| `data`   | `/var/lib/stalwart` |        20 Gi | Mailboxes, queue spool, embedded data/blob stores             |
+
+```yaml
+persistence:
+  config:
+    size: 1Gi
+    storageClass: ""           # use cluster default
+  data:
+    size: 50Gi
+    storageClass: fast-ssd
+    accessMode: ReadWriteOnce
+```
+
+Both PVCs default to `ReadWriteOnce` — Stalwart is single-instance in this chart. If you offload state to PostgreSQL + S3 (via the platform chart) the data PVC mostly holds the queue, so it can be sized smaller.
+
+> The `config` PVC contains the generated admin password and the active config — back it up. Losing it forces re-bootstrap.
 
 ## Configuration
 
-<!-- TODO: Document the environment variables your application consumes. -->
+Stalwart is configured through `/etc/stalwart/config.json`, populated on first run by the in-cluster setup wizard. The chart does not pre-populate the file — point your browser at the admin UI after install and follow the prompts.
 
 ### Environment variables
 
-Set `env` to inject environment variables into the container:
+Use `env` for non-secret values:
 
 ```yaml
 env:
-  - name: LOG_LEVEL
-    value: "info"
-  # - name: DATABASE_URL      # usually injected via envFrom from a Secret
-  #   value: "..."
+  - name: STALWART_FQDN
+    value: mail.example.com
 ```
 
 ### Injecting secrets
@@ -41,13 +109,11 @@ envFrom:
       name: stalwart
 ```
 
-See the [platform chart docs](./helm-platform.md#externalsecrets) for how the Secret gets populated.
+See the [platform chart docs](./helm-platform.md#externalsecrets) for which keys to map.
 
-## Ingress
+## Ingress (HTTP)
 
-The base chart emits a Gateway API `HTTPRoute`. A parent `Gateway` (with listeners and TLS) is expected to be provided by the platform — typically a gateway chart such as `hiroba-gateway` — so the app chart only owns the route itself.
-
-### Minimum configuration
+The base chart emits a Gateway API `HTTPRoute` for HTTP-based protocols (admin UI, JMAP, CalDAV, CardDAV, WebDAV). A parent `Gateway` with a TLS-terminating HTTPS listener is expected from the platform — typically a gateway chart such as `hiroba-gateway`.
 
 ```yaml
 gateway:
@@ -56,63 +122,43 @@ gateway:
       namespace: gateway-system
       sectionName: https   # pin to the HTTPS listener
   hostnames:
-    - stalwart.yourdomain.com
+    - mail.example.com
 ```
 
-Pin `sectionName` to an HTTPS listener to avoid silently serving plaintext. HTTP→HTTPS redirect is a listener-level concern and lives on the parent Gateway, not in this chart.
+Pin `sectionName` to an HTTPS listener so plaintext traffic doesn't silently match. HTTP→HTTPS redirect is a listener-level concern that lives on the parent Gateway.
 
 ### Custom routing rules
 
-The default catch-all sends all traffic to the service. To split paths (e.g. `/api` to a different backend) set `gateway.rules`:
+The default catch-all sends every path to the HTTP port. Override `gateway.rules` if you need to split paths (e.g. route `/.well-known/caldav` differently). `backendRefs` are wired automatically to the chart's HTTP port.
 
-```yaml
-gateway:
-  rules:
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /api
-      filters:
-        - type: RequestHeaderModifier
-          requestHeaderModifier:
-            add:
-              - name: X-Forwarded-Prefix
-                value: /api
-```
+## Probes
 
-<!-- TODO: Add `gateway.defaultFilters` with security response headers (HSTS, X-Frame-Options, Referrer-Policy, etc.) once your app has been tested against them. CSP in particular needs per-deployment tuning. -->
+Liveness and readiness probes hit Stalwart's `/healthz/live` and `/healthz/ready` endpoints on the HTTP port (`8080`). The defaults give Stalwart 30 seconds to come up before liveness fails, which matters when the data store is being opened the first time.
 
 ## Scaling
 
-Horizontal autoscaling is off by default:
+`autoscaling.enabled` is **off** and `replicaCount` is **1** by design — Stalwart with the chart's default RWO PVCs is single-instance. Multi-replica deployments require:
 
-```yaml
-autoscaling:
-  enabled: true
-  minReplicas: 2
-  maxReplicas: 10
-  targetCPUUtilizationPercentage: 80
-```
+- An external data store (PostgreSQL via the platform chart, or FoundationDB)
+- An external blob store (S3 via the platform chart)
+- An RWX volume or no volume for `/var/lib/stalwart`
 
-<!-- TODO: Confirm your application is stateless before enabling autoscaling. If it holds in-process state (sessions, caches, websockets), pin a single replica or externalize state first. -->
+Once you've moved state out of the pod, raise `replicaCount` and consider enabling the HPA. The chart's HPA template is generic — replace its CPU metric with one Stalwart actually correlates with (e.g. `stalwart_smtp_active_connections`) before relying on it.
 
 ### PodDisruptionBudget
 
-Once you're running more than one replica, enable a PDB so node drains / cluster upgrades can't take the app fully offline:
+Once you're running more than one replica, enable a PDB so node drains can't take the mail server fully offline:
 
 ```yaml
 podDisruptionBudget:
   enabled: true
   minAvailable: 1
-  # maxUnavailable: "25%"   # mutually exclusive — set minAvailable: null to use this
 ```
 
-The selector reuses `app.selectorLabels`, so it matches the Deployment's pods automatically — no cross-release label coupling needed.
-
-## Probes
-
-Liveness and readiness probes target `/healthz` and `/readyz` on the container port. Override the defaults in `livenessProbe` / `readinessProbe` if your application exposes different paths.
+The selector reuses the Deployment's pod labels — no cross-release coupling.
 
 ## Security context
 
-The pod runs as UID `1000` with `readOnlyRootFilesystem: true` and all Linux capabilities dropped. If your application needs to write to the filesystem, add an `emptyDir` volume under `extraVolumes` / `extraVolumeMounts` rather than loosening the security context.
+The pod runs as UID `2000` (matching the upstream image's `stalwart` user) with `readOnlyRootFilesystem: true`, all Linux capabilities dropped, and `allowPrivilegeEscalation: false`. The upstream image grants `cap_net_bind_service` directly on the binary via `setcap`, so port `25` etc. work without adding capabilities to the container.
+
+If a future Stalwart feature needs to write outside the mounted volumes, prefer adding an `emptyDir` to `extraVolumes` over loosening the security context.

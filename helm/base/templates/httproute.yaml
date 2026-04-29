@@ -1,3 +1,4 @@
+{{- if .Values.gateway.enabled }}
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -43,7 +44,7 @@ spec:
         {{- end }}
       backendRefs:
         - name: {{ include "app.fullname" $ }}
-          port: {{ $.Values.service.port }}
+          port: {{ $.Values.service.ports.http }}
       {{- if .filters }}
       filters:
         {{- toYaml .filters | nindent 8 }}
@@ -56,5 +57,6 @@ spec:
             value: /
       backendRefs:
         - name: {{ include "app.fullname" . }}
-          port: {{ .Values.service.port }}
+          port: {{ .Values.service.ports.http }}
     {{- end }}
+{{- end }}

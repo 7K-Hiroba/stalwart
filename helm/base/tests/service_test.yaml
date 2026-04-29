@@ -9,21 +9,87 @@ tests:
       - equal:
           path: spec.type
           value: ClusterIP
-      - equal:
-          path: spec.ports[0].port
-          value: 80
 
-  - it: uses configured port and type
+  - it: exposes the http port for the admin UI / JMAP
+    asserts:
+      - contains:
+          path: spec.ports
+          content:
+            name: http
+            port: 8080
+            targetPort: http
+            protocol: TCP
+
+  - it: exposes the full mail port set
+    asserts:
+      - contains:
+          path: spec.ports
+          content:
+            name: smtp
+            port: 25
+            targetPort: smtp
+            protocol: TCP
+      - contains:
+          path: spec.ports
+          content:
+            name: submission
+            port: 587
+            targetPort: submission
+            protocol: TCP
+      - contains:
+          path: spec.ports
+          content:
+            name: submissions
+            port: 465
+            targetPort: submissions
+            protocol: TCP
+      - contains:
+          path: spec.ports
+          content:
+            name: imap
+            port: 143
+            targetPort: imap
+            protocol: TCP
+      - contains:
+          path: spec.ports
+          content:
+            name: imaps
+            port: 993
+            targetPort: imaps
+            protocol: TCP
+      - contains:
+          path: spec.ports
+          content:
+            name: pop3
+            port: 110
+            targetPort: pop3
+            protocol: TCP
+      - contains:
+          path: spec.ports
+          content:
+            name: pop3s
+            port: 995
+            targetPort: pop3s
+            protocol: TCP
+      - contains:
+          path: spec.ports
+          content:
+            name: sieve
+            port: 4190
+            targetPort: sieve
+            protocol: TCP
+
+  - it: switches to LoadBalancer when set
     set:
-      service.type: NodePort
-      service.port: 8080
+      service.type: LoadBalancer
+      service.externalTrafficPolicy: Local
     asserts:
       - equal:
           path: spec.type
-          value: NodePort
+          value: LoadBalancer
       - equal:
-          path: spec.ports[0].port
-          value: 8080
+          path: spec.externalTrafficPolicy
+          value: Local
 
   - it: has correct selector labels
     release:
@@ -34,3 +100,12 @@ tests:
       - equal:
           path: spec.selector["app.kubernetes.io/instance"]
           value: my-release
+
+  - it: applies service annotations
+    set:
+      service.annotations:
+        metallb.universe.tf/allow-shared-ip: stalwart
+    asserts:
+      - equal:
+          path: metadata.annotations["metallb.universe.tf/allow-shared-ip"]
+          value: stalwart

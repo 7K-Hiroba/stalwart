@@ -8,6 +8,10 @@ spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
   {{- end }}
+  {{- with .Values.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "app.selectorLabels" . | nindent 6 }}
@@ -34,9 +38,11 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
-            - name: http
-              containerPort: {{ .Values.service.targetPort }}
+            {{- range $name, $port := .Values.service.ports }}
+            - name: {{ $name }}
+              containerPort: {{ $port }}
               protocol: TCP
+            {{- end }}
           {{- with .Values.livenessProbe }}
           livenessProbe:
             {{- toYaml . | nindent 12 }}
@@ -51,11 +57,33 @@ spec:
           env:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.extraVolumeMounts }}
+          {{- with .Values.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- $mounts := list }}
+          {{- if .Values.persistence.config.enabled }}
+          {{- $mounts = append $mounts (dict "name" "config" "mountPath" "/etc/stalwart") }}
+          {{- end }}
+          {{- if .Values.persistence.data.enabled }}
+          {{- $mounts = append $mounts (dict "name" "data" "mountPath" "/var/lib/stalwart") }}
+          {{- end }}
+          {{- $mounts = append $mounts (dict "name" "tmp" "mountPath" "/tmp") }}
+          {{- $mounts = concat $mounts .Values.extraVolumeMounts }}
+          {{- with $mounts }}
           volumeMounts:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-      {{- with .Values.extraVolumes }}
+      {{- $volumes := list }}
+      {{- if .Values.persistence.config.enabled }}
+      {{- $volumes = append $volumes (dict "name" "config" "persistentVolumeClaim" (dict "claimName" (printf "%s-config" (include "app.fullname" .)))) }}
+      {{- end }}
+      {{- if .Values.persistence.data.enabled }}
+      {{- $volumes = append $volumes (dict "name" "data" "persistentVolumeClaim" (dict "claimName" (printf "%s-data" (include "app.fullname" .)))) }}
+      {{- end }}
+      {{- $volumes = append $volumes (dict "name" "tmp" "emptyDir" dict) }}
+      {{- $volumes = concat $volumes .Values.extraVolumes }}
+      {{- with $volumes }}
       volumes:
         {{- toYaml . | nindent 8 }}
       {{- end }}

@@ -1,10 +1,18 @@
 # Default values for stalwart
+#
+# Stalwart is an all-in-one mail & collaboration server (SMTP, IMAP, POP3, JMAP,
+# CalDAV, CardDAV, WebDAV, ManageSieve). The container exposes HTTP-based
+# protocols on port 8080 and raw TCP for the mail family. The base chart wires
+# every port through a single Service; the HTTPRoute attaches only to the HTTP
+# port — mail TCP ports are reached by the in-cluster Service or, when
+# `service.type: LoadBalancer`, by the cloud LB that fronts it.
 
 replicaCount: 1
 
 image:
-  repository: ghcr.io/7k-hiroba/stalwart
+  repository: docker.io/stalwartlabs/stalwart
   pullPolicy: IfNotPresent
+  # Pinned upstream tag — falls back to Chart.appVersion when empty
   tag: ""
 
 imagePullSecrets: []
@@ -18,23 +26,51 @@ serviceAccount:
 
 podAnnotations: {}
 
+# Stalwart's upstream Dockerfile creates user `stalwart` with UID/GID 2000
 podSecurityContext:
   runAsNonRoot: true
-  runAsUser: 1000
-  fsGroup: 1000
+  runAsUser: 2000
+  runAsGroup: 2000
+  fsGroup: 2000
 
+# Stalwart needs to bind privileged ports (25, 110, 143, 443, 465, 587, 993, 995)
+# but the upstream image grants this through `setcap cap_net_bind_service` on the
+# binary, so the container can stay non-root with no Linux capabilities added.
 securityContext:
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: true
   capabilities:
     drop:
       - ALL
+    add:
+      - NET_BIND_SERVICE
+
+# Single replica with RWO PVCs — multi-replica deployments require an external
+# data store (PostgreSQL, FoundationDB, S3) and are out of scope for this chart.
+strategy:
+  type: Recreate
 
 service:
   type: ClusterIP
-  port: 80
-  targetPort: 8080
+  # External traffic policy — set to "Local" with type: LoadBalancer to preserve
+  # client source IPs (relevant for SMTP greylisting / abuse tracking).
+  externalTrafficPolicy: ""
+  # All Stalwart-served ports. Names match Stalwart's protocol terminology and
+  # are used for both Service ports and the container ports they target.
+  ports:
+    http: 8080
+    smtp: 25
+    submission: 587
+    submissions: 465
+    imap: 143
+    imaps: 993
+    pop3: 110
+    pop3s: 995
+    sieve: 4190
+  annotations: {}
 
+# Gateway API HTTPRoute — covers HTTP-based access (admin UI, JMAP, CalDAV,
+# CardDAV, WebDAV). Mail TCP traffic does not flow through the Gateway.
 gateway:
   enabled: true
   annotations: {}
@@ -45,59 +81,75 @@ gateway:
       # sectionName: https
   # -- Hostnames to match
   hostnames:
-    - myapp.example.com
-  # -- Routing rules (omit for a simple catch-all route to the service)
+    - mail.example.com
+  # -- Routing rules (omit for a simple catch-all route to the http port)
   rules: []
-  #  - matches:
-  #      - path:
-  #          type: PathPrefix
-  #          value: /api
-  #    filters:
-  #      - type: RequestHeaderModifier
-  #        requestHeaderModifier:
-  #          add:
-  #            - name: X-Forwarded-Prefix
-  #              value: /api
 
 resources:
   limits:
-    cpu: 500m
-    memory: 256Mi
+    cpu: "2"
+    memory: 2Gi
   requests:
-    cpu: 100m
-    memory: 128Mi
+    cpu: 250m
+    memory: 512Mi
 
+# Stalwart's `/healthz/live` is served on the HTTP port (8080)
 livenessProbe:
   httpGet:
-    path: /healthz
+    path: /healthz/live
     port: http
-  initialDelaySeconds: 10
-  periodSeconds: 10
+  initialDelaySeconds: 30
+  periodSeconds: 30
+  timeoutSeconds: 5
 
 readinessProbe:
   httpGet:
-    path: /readyz
+    path: /healthz/ready
     port: http
-  initialDelaySeconds: 5
-  periodSeconds: 5
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
 
+# HPA off — Stalwart is stateful (RWO persistence, in-process queues) and does
+# not horizontally scale without an external data backend.
 autoscaling:
   enabled: false
   minReplicas: 1
-  maxReplicas: 10
+  maxReplicas: 1
   targetCPUUtilizationPercentage: 80
 
-# -- Pod Disruption Budget. Only meaningful when running more than one replica
-# (replicaCount > 1 or autoscaling.enabled).
+# -- Pod Disruption Budget. Only meaningful when running more than one replica.
 podDisruptionBudget:
   enabled: false
-  # -- Exactly one of minAvailable or maxUnavailable should be set
   minAvailable: 1
   # maxUnavailable: 1
+
+# Persistent volumes for Stalwart's config (/etc/stalwart) and data
+# (/var/lib/stalwart). On first install Stalwart writes a generated admin
+# password and config skeleton to the config volume — losing it forces a
+# re-bootstrap, so back it up.
+persistence:
+  config:
+    enabled: true
+    size: 1Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    annotations: {}
+  data:
+    enabled: true
+    size: 20Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    annotations: {}
 
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+# Extra environment variables (e.g. STALWART_FQDN, JAVA-style overrides). For
+# secrets prefer `envFrom` with a Secret produced by the platform chart's
+# ExternalSecrets integration.
 env: []
+envFrom: []
 extraVolumes: []
 extraVolumeMounts: []

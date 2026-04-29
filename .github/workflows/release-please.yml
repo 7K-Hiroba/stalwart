@@ -34,16 +34,6 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-  publish-app:
-    needs: release-please
-    if: needs.release-please.outputs.app--release_created == 'true'
-    uses: 7K-Hiroba/workflows-library/.github/workflows/release-app.yml@v1
-    with:
-      image-name: stalwart
-      path: .
-      version: ${{ needs.release-please.outputs.app--version }}
-    secrets: inherit
-
   publish-helm-base:
     needs: release-please
     if: needs.release-please.outputs.helm-base--release_created == 'true'
@@ -69,15 +59,6 @@ jobs:
     with:
       path: docs
       version: ${{ needs.release-please.outputs.docs--version }}
-    secrets: inherit
-
-  publish-crossplane:
-    needs: release-please
-    if: needs.release-please.outputs.crossplane--release_created == 'true'
-    uses: 7K-Hiroba/workflows-library/.github/workflows/release-crossplane.yml@v1
-    with:
-      path: crossplane
-      version: ${{ needs.release-please.outputs.crossplane--version }}
     secrets: inherit
 
   detect-artifacthub-changes:

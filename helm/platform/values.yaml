@@ -1,16 +1,19 @@
-# Platform chart examples for stalwart
-# These are example resource definitions managed by cluster operators (CNPG, Crossplane, etc.).
-# Add, remove, or customise them to match your application's needs.
+# Platform chart for Stalwart.
+#
+# Stalwart can run with embedded RocksDB / SQLite for everything, but homelab
+# deployments at any meaningful scale benefit from offloading the data store to
+# PostgreSQL and the blob store (mail bodies, attachments, Sieve scripts) to S3.
+# Both are gated behind `enabled: false` flags — turn on what you need.
 #
 # Each resource supports a `provider` switch to select the backend implementation.
 # Available providers are listed per resource — add your own by creating a
 # matching template file in templates/<category>/<resource>-<provider>.yaml
 #
 # Templates are organized into subdirectories:
-#   database/    — Database resources (CNPG, etc.)
-#   storage/     — Object storage (Crossplane, Garage, etc.)
-#   secrets/     — External secrets management
-#   observability/ — ServiceMonitors, Grafana dashboards, PrometheusRules
+#   database/    — PostgreSQL via CNPG (Stalwart data store backend)
+#   storage/     — S3 blob storage (Stalwart blob store backend)
+#   secrets/     — ExternalSecrets for admin password, DB creds, encryption keys
+#   observability/ — ServiceMonitor, Grafana dashboard, PrometheusRules
 
 global:
   # -- Application name, used as prefix for all platform resources
@@ -20,9 +23,11 @@ global:
   # releases of the same app coexist safely. Leave empty to match by name only.
   baseInstance: ""
 
-# -- PostgreSQL database
+# -- PostgreSQL data store (Stalwart `data-store` backend).
+# Holds account metadata, mailbox state, ACLs, sessions. Disable to fall back to
+# Stalwart's embedded RocksDB / SQLite store managed inside the data PVC.
 postgres:
-  enabled: true
+  enabled: false
   # -- Provider: "cnpg" (CloudNativePG operator)
   provider: cnpg
   instances: 1
@@ -39,22 +44,25 @@ postgres:
   # -- PostgreSQL version
   imageName: ghcr.io/cloudnative-pg/postgresql:16.2
   # -- Database name to create
-  database: app
+  database: stalwart
   # -- Database owner
-  owner: app
+  owner: stalwart
   # -- Backup configuration (optional)
   backup:
     enabled: false
     schedule: "0 2 * * *"
     retentionPolicy: "7d"
 
-# -- S3-compatible object storage
+# -- S3-compatible blob storage (Stalwart `blob-store` backend).
+# Holds raw message bytes, attachments, and Sieve scripts. For homelab use cases
+# without an S3 backend, leave disabled — Stalwart will store blobs on the data
+# PVC instead.
 s3:
   enabled: false
   # -- Provider: "crossplane" | "garage"
-  provider: crossplane
+  provider: garage
   # -- Bucket name (will be prefixed with app name)
-  bucketName: assets
+  bucketName: blob
   # -- Access control
   acl: private
 
@@ -90,14 +98,21 @@ externalSecrets:
   storeRef:
     name: cluster-secret-store
     kind: ClusterSecretStore
-  # -- Individual secret mappings
+  # -- Individual secret mappings. Stalwart typically needs the admin
+  # password, DB credentials, S3 access keys, and DKIM/encryption keys.
   data: []
-  #  - secretKey: DATABASE_URL
-  #    remoteKey: myapp/database
-  #    property: url
-  #  - secretKey: API_KEY
-  #    remoteKey: myapp/api
-  #    property: key
+  #  - secretKey: STALWART_ADMIN_PASSWORD
+  #    remoteKey: stalwart/admin
+  #    property: password
+  #  - secretKey: STALWART_STORE_DB_PASSWORD
+  #    remoteKey: stalwart/postgres
+  #    property: password
+  #  - secretKey: STALWART_STORE_BLOB_ACCESS_KEY
+  #    remoteKey: stalwart/s3
+  #    property: accessKey
+  #  - secretKey: STALWART_STORE_BLOB_SECRET_KEY
+  #    remoteKey: stalwart/s3
+  #    property: secretKey
   # -- Pull all keys from a remote path
   dataFrom: []
   #  - extract:
@@ -135,30 +150,32 @@ observability:
   # -- PrometheusRule alerts. `groups` is passed through `tpl` so values can
   # reference `.Release.Namespace`, `include "platform.name" .`, etc. Override
   # entirely to replace the defaults, or append to extend them.
+  #
+  # The defaults below use availability-style alerts that don't depend on
+  # specific Stalwart metric names — `up == 0` (the scrape itself failing) and
+  # container restarts. Once you've confirmed which metrics your Stalwart build
+  # exposes (e.g. `stalwart_smtp_received_total`,
+  # `stalwart_imap_active_sessions`), add protocol-specific alerts on top.
   prometheusRules:
     enabled: false
     groups:
       - name: '{{ include "platform.name" . }}.rules'
         rules:
-          - alert: HighErrorRate
+          - alert: StalwartDown
             expr: |
-              sum(rate(http_requests_total{namespace="{{ .Release.Namespace }}", service="{{ include "platform.name" . }}", status=~"5.."}[5m]))
-              /
-              sum(rate(http_requests_total{namespace="{{ .Release.Namespace }}", service="{{ include "platform.name" . }}"}[5m]))
-              > 0.05
+              up{namespace="{{ .Release.Namespace }}", service="{{ include "platform.name" . }}"} == 0
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: 'Stalwart instance {{`{{ $labels.instance }}`}} is down'
+              description: "Prometheus has not been able to scrape Stalwart for 5 minutes."
+          - alert: StalwartContainerRestarting
+            expr: |
+              increase(kube_pod_container_status_restarts_total{namespace="{{ .Release.Namespace }}", pod=~"{{ include "platform.name" . }}-.*"}[15m]) > 2
             for: 5m
             labels:
               severity: warning
             annotations:
-              summary: 'High error rate for {{ include "platform.name" . }}'
-              description: "Error rate is above 5% for the last 5 minutes."
-          - alert: HighLatency
-            expr: |
-              histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{namespace="{{ .Release.Namespace }}", service="{{ include "platform.name" . }}"}[5m]))
-              > 1
-            for: 5m
-            labels:
-              severity: warning
-            annotations:
-              summary: 'High p99 latency for {{ include "platform.name" . }}'
-              description: "p99 latency is above 1 second for the last 5 minutes."
+              summary: 'Stalwart container restarting in {{`{{ $labels.pod }}`}}'
+              description: "Container has restarted more than twice in the last 15 minutes — likely a crash loop."

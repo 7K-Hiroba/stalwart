@@ -4,9 +4,9 @@ sidebar_position: 4
 
 # Helm platform chart
 
-The platform chart provisions resources that **surround** the application: databases, object storage, secrets, and observability. It is optional — install the [base chart](./helm-base.md) alone for a minimal deployment.
+The platform chart provisions resources that **surround** Stalwart: a PostgreSQL data store, an S3-compatible blob store, ExternalSecrets for credentials, and observability (ServiceMonitor, Grafana dashboard, PrometheusRules). It is optional — install the [base chart](./helm-base.md) alone for a minimal single-instance deployment with embedded RocksDB + on-disk blob store.
 
-Every section ships disabled by default so the chart is safe to install into clusters that don't have the relevant operators present. Enabling a feature without its required CRDs causes `helm install` to fail early with a clear error, rather than silently creating Custom Resources nothing is reconciling.
+Every section ships **disabled by default** so the chart is safe to install into clusters that don't have the relevant operators present. Enabling a feature without its required CRDs causes `helm install` to fail early with a clear error rather than silently creating Custom Resources nothing is reconciling.
 
 ## Matching the base chart
 
@@ -17,84 +17,89 @@ global:
   baseInstance: stalwart   # release name used for `helm install <name> ./helm/base`
 ```
 
-Leave it empty to match by name only — acceptable when only one release of the app runs in the cluster.
+Leave it empty to match by name only — fine when only one Stalwart release runs in the cluster.
 
 > PodDisruptionBudget lives in the [base chart](./helm-base.md#poddisruptionbudget), not here — it's tightly coupled to the Deployment's lifecycle.
 
-Values reference: [`helm/platform/values.yaml`](https://github.com/7KGroup/stalwart/blob/main/helm/platform/values.yaml)
+Values reference: [`helm/platform/values.yaml`](https://github.com/7K-Hiroba/stalwart/blob/main/helm/platform/values.yaml)
 
 ## Install
 
 ```bash
 helm install stalwart-platform ./helm/platform \
   --set postgres.enabled=true \
-  --set externalSecrets.enabled=true
+  --set externalSecrets.enabled=true \
+  --set observability.serviceMonitor.enabled=true
 ```
 
-## PostgreSQL
+## PostgreSQL data store
 
-Provisions a PostgreSQL cluster via [CloudNativePG](https://cloudnative-pg.io/).
+Provisions a PostgreSQL cluster via [CloudNativePG](https://cloudnative-pg.io/). Stalwart uses it as the **data store backend** — account metadata, mailbox state, ACLs, sessions. Without it Stalwart falls back to RocksDB on the data PVC, which is fine for small homelab installs but doesn't scale to multiple replicas.
 
-### Prerequisites
+### PostgreSQL prerequisites
 
 - CloudNativePG operator installed in the cluster
 - A `StorageClass` available for the data volume
 
-### Configuration
+### PostgreSQL configuration
 
 ```yaml
 postgres:
   enabled: true
   provider: cnpg
-  instances: 1            # use 3 for HA
+  instances: 1            # 3 for HA
   storage:
     size: 10Gi
-    storageClass: ""      # omit to use the cluster default
-  database: app
-  owner: app
+    storageClass: ""      # cluster default
+  database: stalwart
+  owner: stalwart
   backup:
     enabled: true
     schedule: "0 2 * * *"
     retentionPolicy: "7d"
 ```
 
-Connection credentials are published to a `Secret` named `stalwart-app` that the base chart can pull via `envFrom`.
+CNPG publishes connection credentials to a `Secret` named `stalwart-pg-app`. Wire it into Stalwart by either:
 
-## S3 / Object storage
+- adding `envFrom: [{ secretRef: { name: stalwart-pg-app } }]` to the base chart values, then referencing the env vars in `config.json`
+- mapping the keys via ExternalSecrets (below) into a single combined Secret
 
-Provisions an S3-compatible bucket. Two providers are supported:
+## S3 blob store
+
+Provisions an S3-compatible bucket. Stalwart uses it as the **blob store backend** — raw message bytes, attachments, Sieve scripts. Two providers:
 
 - **`crossplane`** — provisions a real bucket on AWS (or an S3-compatible cloud) via Crossplane's S3 provider
-- **`garage`** — creates a bucket in an in-cluster [Garage](https://garagehq.deuxfleurs.fr/) deployment
+- **`garage`** — creates a bucket on an in-cluster [Garage](https://garagehq.deuxfleurs.fr/) deployment (homelab-friendly)
 
-### Configuration
+### S3 configuration
 
 ```yaml
 s3:
   enabled: true
-  provider: crossplane   # or "garage"
-  bucketName: assets
+  provider: garage
+  bucketName: blob
   acl: private
-  crossplane:
-    region: us-east-1
-    providerConfigRef: aws-provider
-    lifecycle:
-      enabled: true
-      expirationDays: 90
+  garage:
+    endpoint: "http://garage.garage.svc.cluster.local:3900"
+    accessKeySecret: { name: garage-stalwart, key: accessKey }
+    secretKeySecret: { name: garage-stalwart, key: secretKey }
+    replicationFactor: 3
 ```
 
-Swap the provider by changing `s3.provider` — the provider-specific blocks (`crossplane`, `garage`) configure the chosen backend.
+Switch backends by changing `s3.provider` — the provider-specific blocks (`crossplane`, `garage`) configure each implementation.
+
+You'll still need to point Stalwart's blob store at the bucket. The simplest path is to put the access key, secret key, and endpoint into the ExternalSecret below, then reference them from `config.json` via env-var interpolation.
 
 ## ExternalSecrets
 
 Populates a Kubernetes `Secret` from an upstream store (Vault, AWS Secrets Manager, 1Password, etc.) via an `ExternalSecret` resource. The base chart's `envFrom` then pulls credentials from this `Secret`.
 
-### Prerequisites
+### ExternalSecrets prerequisites
 
 - [external-secrets operator](https://external-secrets.io/) installed in the cluster
 - A `ClusterSecretStore` (or `SecretStore`) configured and reachable
 
-### Configuration
+### ExternalSecrets configuration
 
 ```yaml
 externalSecrets:
@@ -104,12 +109,18 @@ externalSecrets:
     name: cluster-secret-store
     kind: ClusterSecretStore
   data:
-    - secretKey: DATABASE_URL
-      remoteKey: stalwart/database
-      property: url
-    - secretKey: API_KEY
-      remoteKey: stalwart/api
-      property: key
+    - secretKey: STALWART_ADMIN_PASSWORD
+      remoteKey: stalwart/admin
+      property: password
+    - secretKey: STALWART_STORE_DB_PASSWORD
+      remoteKey: stalwart/postgres
+      property: password
+    - secretKey: STALWART_STORE_BLOB_ACCESS_KEY
+      remoteKey: stalwart/s3
+      property: accessKey
+    - secretKey: STALWART_STORE_BLOB_SECRET_KEY
+      remoteKey: stalwart/s3
+      property: secretKey
 ```
 
 To pull every key under a remote path instead of mapping them individually, use `dataFrom`:
@@ -123,7 +134,7 @@ externalSecrets:
 
 ### Value transformation
 
-Use `target.template` to synthesize new secret values from the retrieved ones (e.g. compose a URL from parts). See the [ESO templating guide](https://external-secrets.io/latest/guides/templating/):
+Use `target.template` to synthesize new secret values from the retrieved ones (e.g. compose a connection string from parts). See the [ESO templating guide](https://external-secrets.io/latest/guides/templating/):
 
 ```yaml
 externalSecrets:
@@ -131,10 +142,10 @@ externalSecrets:
     template:
       type: Opaque
       data:
-        DATABASE_URL: "postgres://{{ `{{ .username }}` }}:{{ `{{ .password }}` }}@host/{{ `{{ .database }}` }}"
+        STALWART_STORE_DB_URL: "postgres://{{ `{{ .username }}` }}:{{ `{{ .password }}` }}@host/stalwart"
 ```
 
-The double-brace escape (`{{ ` ... ` }}`) is needed because Helm processes the values file first; the inner braces reach ESO untouched.
+The double-brace escape (`` `{{ `` ... `` }}` ``) is needed because Helm processes the values file first; the inner braces reach ESO untouched.
 
 ### Wiring back into the base chart
 
@@ -147,13 +158,13 @@ envFrom:
       name: stalwart
 ```
 
-See the [base chart injecting-secrets section](./helm-base.md#injecting-secrets) for which variables to map.
+Stalwart's [config supports environment-variable interpolation](https://stalw.art/docs/configuration/overview), so `STALWART_*` env vars can be read directly from `config.json` (e.g. `"value": "%{env:STALWART_STORE_DB_PASSWORD}%"`).
 
 ## Observability
 
 ### ServiceMonitor
 
-Scrapes the container's `/metrics` endpoint via the Prometheus Operator.
+Scrapes Stalwart's `/metrics` endpoint via the Prometheus Operator. Metrics are served on the same port as the admin UI (`http`, port 8080).
 
 ```yaml
 observability:
@@ -177,40 +188,37 @@ Deploys dashboards as a `ConfigMap` with the Grafana sidecar label. The sidecar 
 observability:
   grafanaDashboard:
     enabled: true
-    folderLabel: "Applications"
+    folderLabel: "Mail"
 ```
 
-Dashboards are loaded from `helm/platform/dashboards/*.json`. Each JSON file becomes a key in the ConfigMap and is run through Helm's `tpl` function, so you can reference chart helpers inside the JSON — use backtick-quoted args for `include` (e.g. ``{{ include `platform.name` . }}``) since JSON escapes break inside Go template actions. Drop additional dashboards into the directory and they ship alongside the default.
-
-<!-- TODO: Replace the default dashboard JSON with panels that match the metrics your app actually emits. -->
+Dashboards are loaded from `helm/platform/dashboards/*.json`. The shipped dashboard is a placeholder using generic `http_*` metrics — replace it with panels driven by Stalwart's actual metric names (`stalwart_smtp_*`, `stalwart_imap_*`, queue depth, delivery latency) once you've confirmed which ones your build exposes.
 
 ### PrometheusRules
 
-Ships alert rules for error rate and latency. The group definitions live under `observability.prometheusRules.groups` and are passed through `tpl`, so you can reference chart helpers and release context inside expressions:
+Ships availability-style alerts that don't depend on Stalwart-specific metric names — `up == 0` (scrape failed) and container restart loops. Enable, then layer protocol-specific alerts on top once you've inspected `/metrics` on a running instance.
 
 ```yaml
 observability:
   prometheusRules:
     enabled: true
     groups:
-      - name: '{{ include "platform.name" . }}.rules'
+      - name: stalwart.protocols
         rules:
-          - alert: HighErrorRate
+          - alert: StalwartSMTPHighRejectRate
             expr: |
-              sum(rate(http_requests_total{service="{{ include "platform.name" . }}", status=~"5.."}[5m])) > 0.05
-            for: 5m
+              rate(stalwart_smtp_rejected_total[5m]) > 5
+            for: 10m
             labels:
               severity: warning
             annotations:
-              summary: "High error rate"
+              summary: "Stalwart is rejecting SMTP at >5/s"
 ```
 
 Override the whole list to replace the built-in alerts, or append to extend them. Requires the Prometheus Operator CRDs.
 
-<!-- TODO: The default alerts assume `http_requests_total` / `http_request_duration_seconds_bucket` metric names. Replace them with alerts based on metrics your app actually exposes, or switch to kube-state-metrics based checks (`kube_pod_container_status_restarts_total`, `up == 0`) for a generic baseline. -->
-
 ## What this chart does NOT install
 
-- The parent `Gateway` resource — provided by a gateway chart
-- TLS certificates — expected to be attached to the Gateway's HTTPS listener
-- Cluster-wide operators (CNPG, Crossplane, external-secrets, Prometheus) — these are platform prerequisites
+- The parent `Gateway` resource — provided by a gateway chart (HTTP only; mail TCP doesn't go through the Gateway)
+- TLS certificates for the Gateway listener — expected to be wired into the Gateway
+- LoadBalancer / NodePort exposure for mail TCP — that's a base-chart `service.type` decision
+- Cluster-wide operators (CNPG, Crossplane, External Secrets, Prometheus Operator) — these are platform prerequisites
