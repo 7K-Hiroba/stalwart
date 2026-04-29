@@ -68,6 +68,7 @@ spec:
           {{- if .Values.persistence.data.enabled }}
           {{- $mounts = append $mounts (dict "name" "data" "mountPath" "/var/lib/stalwart") }}
           {{- end }}
+          {{- $mounts = append $mounts (dict "name" "tmp" "mountPath" "/tmp") }}
           {{- $mounts = concat $mounts .Values.extraVolumeMounts }}
           {{- with $mounts }}
           volumeMounts:
@@ -80,6 +81,7 @@ spec:
       {{- if .Values.persistence.data.enabled }}
       {{- $volumes = append $volumes (dict "name" "data" "persistentVolumeClaim" (dict "claimName" (printf "%s-data" (include "app.fullname" .)))) }}
       {{- end }}
+      {{- $volumes = append $volumes (dict "name" "tmp" "emptyDir" dict) }}
       {{- $volumes = concat $volumes .Values.extraVolumes }}
       {{- with $volumes }}
       volumes:
