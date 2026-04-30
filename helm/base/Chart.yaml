@@ -2,7 +2,7 @@ apiVersion: v2
 name: stalwart
 description: Helm chart for Stalwart, an all-in-one mail and collaboration server
 type: application
-version: 0.1.0
+version: 1.0.0
 appVersion: "v0.16.1"
 maintainers:
   - name: 7k-hiroba
