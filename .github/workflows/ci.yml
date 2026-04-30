@@ -34,3 +34,11 @@ jobs:
     uses: 7K-Hiroba/workflows-library/.github/workflows/ci-docs.yml@v1
     with:
       path: docs
+
+  crossplane:
+    if: >-
+      github.event_name == 'pull_request' ||
+      contains(toJSON(github.event.commits.*.modified), 'crossplane/')
+    uses: 7K-Hiroba/workflows-library/.github/workflows/ci-crossplane.yml@v1
+    with:
+      path: compositions/crossplane

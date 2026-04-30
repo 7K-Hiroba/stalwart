@@ -173,6 +173,24 @@ The scope in the commit message should match the component path or name. Release
 - Grafana dashboards deployed as ConfigMaps with `grafana_dashboard: "1"` label (sidecar discovery)
 - PrometheusRules for alerting (error rate, latency)
 
+## Dependency Management
+
+[Renovate](https://docs.renovatebot.com/) is configured via `renovate.json5` to automatically open PRs when dependencies have new versions. It tracks:
+
+- **Dockerfile base images** (e.g., `node:20-alpine`, `distroless` runtime)
+- **GitHub Actions** versions in `.github/workflows/`
+- **Container images in Helm values** (e.g., `imageName: ghcr.io/cloudnative-pg/postgresql:16.2` in platform chart)
+
+Package rules group related updates into single PRs:
+
+| Group | Includes | Commit prefix |
+| --- | --- | --- |
+| `docker-base-images` | Dockerfile FROM image bumps | `fix(docker):` |
+| `github-actions` | All GitHub Actions version bumps | `ci:` |
+| (ungrouped) | Platform chart image updates | `fix(helm-platform):` |
+
+When Renovate opens a PR for a Dockerfile base image update, verify the new image is compatible with your build and runtime requirements. Helm values image updates (e.g., PostgreSQL) should be tested on a cluster before merging.
+
 ## Markdown Linting
 
 CI runs [markdownlint-cli2](https://github.com/DavidAnson/markdownlint-cli2) on every pull request. Any violation fails the build.
