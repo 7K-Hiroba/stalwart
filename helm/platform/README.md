@@ -43,7 +43,19 @@ The chart fails fast at template-render time if you enable a feature whose CRDs 
 
 Full values in [`values.yaml`](values.yaml), schema in [`values.schema.json`](values.schema.json). Artifact Hub renders the schema as an interactive form.
 
-The chart is split so that **workload-lifecycle** resources (Deployment, HPA, PDB, HTTPRoute, PVCs) live in [`stalwart`](../base/README.md), while **cross-cutting dependencies** (data/blob stores, ESO, observability) live here. This keeps each chart focused and lets operators opt out of platform wiring without losing the app.
+The chart is split so that **workload-lifecycle** resources (StatefulSet, HPA, PDB, HTTPRoute, headless Service, PVC templates) live in [`stalwart`](../base/README.md), while **cross-cutting dependencies** (data/blob stores, ESO, observability) live here. This keeps each chart focused and lets operators opt out of platform wiring without losing the app.
+
+## Wiring into the base chart
+
+`helm install` prints a `NOTES.txt` block with the exact `values.yaml` snippet to paste into the base chart, parameterised with the right Secret names. Run `helm get notes <release>` to retrieve it later.
+
+The pattern: the base chart's `config.json` references env-var names inline (`{"@type": "EnvironmentVariable", "variableName": "X"}`), and the base chart's `env:` array injects those vars from the Secrets this chart provisions (CNPG-managed PG creds, the Garage access/secret-key Secrets, etc.). No aggregation Secret is needed — Kubernetes does the composition natively.
+
+## Bootstrapping non-storage settings (Stalwart 0.16+)
+
+In Stalwart 0.16+ only the data store lives on disk (`/etc/stalwart/config.json`). Blob/FTS/in-memory stores, listeners, OIDC providers, DKIM signatures, and accounts are JMAP objects inside the data store, applied with [`stalwart-cli apply`](https://stalw.art/docs/management/cli/apply) against the management endpoint.
+
+This chart does not yet automate that step. The `NOTES.txt` block walks through the manual flow: enable `recoveryAdmin` on the base chart, port-forward the management port, run `stalwart-cli apply` with a declarative plan.
 
 ## Part of the Hiroba ecosystem
 

@@ -6,6 +6,20 @@
 # every port through a single Service; the HTTPRoute attaches only to the HTTP
 # port — mail TCP ports are reached by the in-cluster Service or, when
 # `service.type: LoadBalancer`, by the cloud LB that fronts it.
+#
+# CONFIGURATION MODEL (Stalwart 0.16+)
+#
+# In 0.16 only the data store lives on disk (`/etc/stalwart/config.json`);
+# everything else (blob/FTS/in-memory stores, listeners, OIDC, DKIM, accounts)
+# lives inside the data store as JMAP objects and is provisioned with
+# `stalwart-cli apply` against the management endpoint. This chart renders
+# `config.json` from `values.config` into a Secret and mounts it; secrets are
+# referenced inline as `{"@type":"EnvironmentVariable","variableName":"X"}`
+# and resolved at startup from envFrom-injected values.
+#
+# Bootstrapping the rest (listeners/OIDC/DKIM/accounts) is NOT yet automated by
+# this chart — port-forward to the management port and run `stalwart-cli apply`
+# or use the WebUI on first install.
 
 replicaCount: 1
 
@@ -45,10 +59,16 @@ securityContext:
     add:
       - NET_BIND_SERVICE
 
-# Single replica with RWO PVCs — multi-replica deployments require an external
-# data store (PostgreSQL, FoundationDB, S3) and are out of scope for this chart.
-strategy:
-  type: Recreate
+# StatefulSet update strategy — StatefulSet supports RollingUpdate (default,
+# pod-by-pod with ordinal ordering) and OnDelete (manual). Recreate isn't a
+# StatefulSet option; HA scale-out also requires an external data store.
+updateStrategy:
+  type: RollingUpdate
+
+# StatefulSet pod-management policy. Parallel speeds up scale events but
+# breaks ordered-by-ordinal startup; OrderedReady (the default) is correct for
+# clusters where node N+1 must wait for node N to be ready.
+podManagementPolicy: OrderedReady
 
 service:
   type: ClusterIP
@@ -67,6 +87,14 @@ service:
     pop3: 110
     pop3s: 995
     sieve: 4190
+  annotations: {}
+
+# Headless Service for StatefulSet identity (stable per-pod DNS like
+# stalwart-0.stalwart-headless.<ns>.svc.cluster.local). Required by
+# StatefulSet.serviceName; needed for any clustered deployment so peers can
+# discover each other. Cheap to keep on for single-replica too.
+headlessService:
+  enabled: true
   annotations: {}
 
 # Gateway API HTTPRoute — covers HTTP-based access (admin UI, JMAP, CalDAV,
@@ -124,17 +152,12 @@ podDisruptionBudget:
   minAvailable: 1
   # maxUnavailable: 1
 
-# Persistent volumes for Stalwart's config (/etc/stalwart) and data
-# (/var/lib/stalwart). On first install Stalwart writes a generated admin
-# password and config skeleton to the config volume — losing it forces a
-# re-bootstrap, so back it up.
+# Persistent volume for Stalwart's data directory (/var/lib/stalwart). Backs the
+# embedded data/blob/FTS stores when not pointed at PostgreSQL/S3, plus session
+# queues/temp state. Rendered as a StatefulSet `volumeClaimTemplates` entry.
+# The 0.15-era /etc/stalwart PVC is gone — config now lives in `values.config`,
+# rendered into a Secret at install time.
 persistence:
-  config:
-    enabled: true
-    size: 1Gi
-    storageClass: ""
-    accessMode: ReadWriteOnce
-    annotations: {}
   data:
     enabled: true
     size: 20Gi
@@ -142,14 +165,80 @@ persistence:
     accessMode: ReadWriteOnce
     annotations: {}
 
+# config.json content. Rendered to JSON, stored in a Secret, mounted at
+# /etc/stalwart/config.json. Stalwart 0.16 deserializes this as a single
+# DataStore object; everything else is in the registry DB.
+#
+# Secret references use the inline tagged-union form Stalwart expects:
+#
+#   password:
+#     "@type": EnvironmentVariable
+#     variableName: STALWART_DATA_PASSWORD
+#
+# or
+#
+#   password:
+#     "@type": File
+#     filePath: /var/run/secrets/stalwart/db-password
+#
+# Inline plaintext (`password: "literal"`) works but is discouraged — the
+# rendered Secret would carry the credential in cleartext base64.
+#
+# Defaults to embedded RocksDB at /var/lib/stalwart (the data PVC mount point).
+# Switch to `Postgres` and inject credentials via envFrom for an external store.
+config:
+  "@type": RocksDb
+  path: /var/lib/stalwart
+  # Postgres example:
+  # "@type": Postgres
+  # host: stalwart-pg-rw.stalwart.svc.cluster.local
+  # port: 5432
+  # database: stalwart
+  # user: stalwart
+  # password:
+  #   "@type": EnvironmentVariable
+  #   variableName: STALWART_DATA_PASSWORD
+
+# Self-managed env Secret. When `secrets.create: true`, the chart renders a
+# Secret from `secrets.env` and adds it to the pod's envFrom. Use this for
+# bootstrap-time credentials (recovery admin, DB password, S3 keys).
+#
+# For production, prefer external-secrets.io / SealedSecrets / Vault Agent:
+# leave `secrets.create: false` and reference the externally-managed Secret
+# via `envFrom: [{ secretRef: { name: my-stalwart-secrets } }]`.
+secrets:
+  create: false
+  # Plain key/value pairs. Stored as Opaque Secret stringData entries.
+  env: {}
+  #   STALWART_DATA_PASSWORD: changeme
+  #   STALWART_BLOB_ACCESS_KEY: changeme
+  #   STALWART_BLOB_SECRET_KEY: changeme
+
+# Recovery mode — flips STALWART_RECOVERY_MODE=1 on the pod. Pair with a
+# STALWART_RECOVERY_ADMIN env var (single `user:password` string) supplied via
+# `secrets.env.STALWART_RECOVERY_ADMIN` or an external Secret in `envFrom`.
+# Used for first-time bootstrap (run `stalwart-cli apply` against the pod's
+# port 8080, then provision a real admin Principal). Disable afterwards.
+recoveryAdmin:
+  enabled: false
+
 nodeSelector: {}
 tolerations: []
 affinity: {}
 
-# Extra environment variables (e.g. STALWART_FQDN, JAVA-style overrides). For
-# secrets prefer `envFrom` with a Secret produced by the platform chart's
-# ExternalSecrets integration.
+# Extra environment variables. Common ones:
+#   STALWART_HOSTNAME — overrides hostname used in cluster identity
+#   STALWART_PUBLIC_URL — base URL shown to clients
+#   STALWART_ROLE — cluster role name (for HA)
+#   STALWART_PUSH_SHARD — push-notification shard ordinal
 env: []
+
+# Extra envFrom sources. Use this to pull credentials from externally-managed
+# Secrets (external-secrets.io, SealedSecrets, Vault Agent) rather than baking
+# them into `secrets.env`.
 envFrom: []
+#   - secretRef:
+#       name: stalwart-platform-wiring
+
 extraVolumes: []
 extraVolumeMounts: []

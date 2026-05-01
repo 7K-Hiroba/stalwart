@@ -21,7 +21,7 @@ tests:
           path: spec.minAvailable
           value: 2
 
-  - it: selector matches the Deployment pod labels
+  - it: selector matches the StatefulSet pod labels
     set:
       podDisruptionBudget.enabled: true
     release:

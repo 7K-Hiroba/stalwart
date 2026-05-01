@@ -98,19 +98,19 @@ externalSecrets:
   storeRef:
     name: cluster-secret-store
     kind: ClusterSecretStore
-  # -- Individual secret mappings. Stalwart typically needs the admin
-  # password, DB credentials, S3 access keys, and DKIM/encryption keys.
+  # -- Individual secret mappings. Key names align with the EnvironmentVariable
+  # references the base chart's config.json uses. Reference this Secret from
+  # the base chart via `envFrom: [{ secretRef: { name: <release>-stalwart } }]`.
   data: []
-  #  - secretKey: STALWART_ADMIN_PASSWORD
-  #    remoteKey: stalwart/admin
-  #    property: password
-  #  - secretKey: STALWART_STORE_DB_PASSWORD
+  #  - secretKey: STALWART_RECOVERY_ADMIN     # user:password — first-install only
+  #    remoteKey: stalwart/recovery-admin
+  #  - secretKey: STALWART_DATA_PASSWORD      # referenced by config.json
   #    remoteKey: stalwart/postgres
   #    property: password
-  #  - secretKey: STALWART_STORE_BLOB_ACCESS_KEY
+  #  - secretKey: STALWART_BLOB_ACCESS_KEY    # for S3 blob backend (provisioned via apply)
   #    remoteKey: stalwart/s3
   #    property: accessKey
-  #  - secretKey: STALWART_STORE_BLOB_SECRET_KEY
+  #  - secretKey: STALWART_BLOB_SECRET_KEY
   #    remoteKey: stalwart/s3
   #    property: secretKey
   # -- Pull all keys from a remote path
