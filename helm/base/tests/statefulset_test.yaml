@@ -1,0 +1,296 @@
+suite: StatefulSet
+templates:
+  - templates/statefulset.yaml
+  - templates/secret-config.yaml
+  - templates/secret-env.yaml
+tests:
+  - it: renders as a StatefulSet with one replica
+    template: templates/statefulset.yaml
+    asserts:
+      - isKind:
+          of: StatefulSet
+      - equal:
+          path: spec.replicas
+          value: 1
+
+  - it: targets the headless service for stable per-pod DNS
+    template: templates/statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.serviceName
+          value: RELEASE-NAME-stalwart-headless
+
+  - it: starts pod ordinals at 1
+    template: templates/statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.ordinals.start
+          value: 1
+
+  - it: defaults podManagementPolicy to OrderedReady
+    template: templates/statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.podManagementPolicy
+          value: OrderedReady
+
+  - it: uses the correct image
+    template: templates/statefulset.yaml
+    set:
+      image.repository: ghcr.io/example/stalwart
+      image.tag: "v0.99.0"
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: "ghcr.io/example/stalwart:v0.99.0"
+
+  - it: falls back to appVersion when tag is empty
+    template: templates/statefulset.yaml
+    set:
+      image.tag: ""
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: ":v0\\.16\\.1$"
+
+  - it: omits replicas when autoscaling is enabled
+    template: templates/statefulset.yaml
+    set:
+      autoscaling.enabled: true
+    asserts:
+      - isNull:
+          path: spec.replicas
+
+  - it: applies pod security context with stalwart UID 2000
+    template: templates/statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+      - equal:
+          path: spec.template.spec.securityContext.runAsUser
+          value: 2000
+      - equal:
+          path: spec.template.spec.securityContext.fsGroup
+          value: 2000
+
+  - it: applies container security context
+    template: templates/statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
+          value: false
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - contains:
+          path: spec.template.spec.containers[0].securityContext.capabilities.drop
+          content: ALL
+
+  - it: exposes all stalwart ports
+    template: templates/statefulset.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: http
+            containerPort: 8080
+            protocol: TCP
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: smtp
+            containerPort: 25
+            protocol: TCP
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: imaps
+            containerPort: 993
+            protocol: TCP
+
+  - it: mounts config.json from the config Secret via subPath
+    template: templates/statefulset.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: config
+            mountPath: /etc/stalwart/config.json
+            subPath: config.json
+            readOnly: true
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: config
+            secret:
+              secretName: RELEASE-NAME-stalwart-config
+
+  - it: provisions the data PVC via volumeClaimTemplates
+    template: templates/statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.volumeClaimTemplates[0].metadata.name
+          value: data
+      - equal:
+          path: spec.volumeClaimTemplates[0].spec.accessModes[0]
+          value: ReadWriteOnce
+      - equal:
+          path: spec.volumeClaimTemplates[0].spec.resources.requests.storage
+          value: 20Gi
+
+  - it: applies size and storageClass overrides on the data PVC
+    template: templates/statefulset.yaml
+    set:
+      persistence.data.size: 100Gi
+      persistence.data.storageClass: fast-ssd
+    asserts:
+      - equal:
+          path: spec.volumeClaimTemplates[0].spec.resources.requests.storage
+          value: 100Gi
+      - equal:
+          path: spec.volumeClaimTemplates[0].spec.storageClassName
+          value: fast-ssd
+
+  - it: omits volumeClaimTemplates when persistence is disabled
+    template: templates/statefulset.yaml
+    set:
+      persistence.data.enabled: false
+    asserts:
+      - isNull:
+          path: spec.volumeClaimTemplates
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: data
+            mountPath: /var/lib/stalwart
+
+  - it: exposes POD_NAME, POD_INDEX, and STALWART_HOSTNAME from the downward API
+    template: templates/statefulset.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: POD_INDEX
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.labels['apps.kubernetes.io/pod-index']
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: STALWART_HOSTNAME
+            value: "$(POD_NAME).RELEASE-NAME-stalwart-headless"
+
+  - it: enables recovery mode when recoveryAdmin.enabled is true
+    template: templates/statefulset.yaml
+    set:
+      recoveryAdmin.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: STALWART_RECOVERY_MODE
+            value: "1"
+
+  - it: omits recovery mode by default
+    template: templates/statefulset.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: STALWART_RECOVERY_MODE
+            value: "1"
+
+  - it: wires self-managed Secret into envFrom when secrets.create is true
+    template: templates/statefulset.yaml
+    set:
+      secrets.create: true
+      secrets.env:
+        STALWART_DATA_PASSWORD: changeme
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].envFrom
+          content:
+            secretRef:
+              name: RELEASE-NAME-stalwart-env
+
+  - it: omits envFrom entirely when no sources are configured
+    template: templates/statefulset.yaml
+    asserts:
+      - isNull:
+          path: spec.template.spec.containers[0].envFrom
+
+  - it: appends user-supplied envFrom entries
+    template: templates/statefulset.yaml
+    set:
+      envFrom:
+        - secretRef:
+            name: external-creds
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].envFrom
+          content:
+            secretRef:
+              name: external-creds
+
+  - it: appends user-supplied env entries
+    template: templates/statefulset.yaml
+    set:
+      env:
+        - name: STALWART_PUBLIC_URL
+          value: https://mail.example.com
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: STALWART_PUBLIC_URL
+            value: https://mail.example.com
+
+  - it: appends extra volumes and mounts
+    template: templates/statefulset.yaml
+    set:
+      extraVolumes:
+        - name: certs
+          secret:
+            secretName: tls-certs
+      extraVolumeMounts:
+        - name: certs
+          mountPath: /etc/ssl/stalwart
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: certs
+            secret:
+              secretName: tls-certs
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: certs
+            mountPath: /etc/ssl/stalwart
+
+  - it: rolls the pod when config.json content changes
+    template: templates/statefulset.yaml
+    asserts:
+      - isNotNull:
+          path: spec.template.metadata.annotations.config-hash
+
+  - it: probes hit the http port on healthz endpoints
+    template: templates/statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.path
+          value: /healthz/live
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.port
+          value: http
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /healthz/ready

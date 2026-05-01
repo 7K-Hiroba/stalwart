@@ -1,0 +1,98 @@
+{{- $name := include "platform.name" . -}}
+{{ $name }} platform installed in namespace {{ .Release.Namespace }}.
+
+Resources provisioned:
+{{- if .Values.postgres.enabled }}
+  - PostgreSQL cluster: {{ $name }}-pg
+    Credentials Secret:  {{ $name }}-pg-app  (CNPG-managed: username, password, host, port, dbname, uri)
+{{- end }}
+{{- if .Values.s3.enabled }}
+  - S3 bucket: {{ $name }}-{{ .Values.s3.bucketName }}
+    Provider: {{ .Values.s3.provider }}
+{{- if eq .Values.s3.provider "garage" }}
+    Endpoint: {{ .Values.s3.garage.endpoint }}
+    Access key Secret:   {{ .Values.s3.garage.accessKeySecret.name }}/{{ .Values.s3.garage.accessKeySecret.key }}
+    Secret key Secret:   {{ .Values.s3.garage.secretKeySecret.name }}/{{ .Values.s3.garage.secretKeySecret.key }}
+{{- end }}
+{{- end }}
+{{- if .Values.externalSecrets.enabled }}
+  - ExternalSecret: {{ $name }}  (target Secret: {{ $name }})
+{{- end }}
+
+==============================================================================
+WIRING into the base chart
+==============================================================================
+
+The base chart consumes credentials via two surfaces:
+
+  1. `config.json` (mounted at /etc/stalwart/config.json) — references env-var
+     names inline using {"@type": "EnvironmentVariable", "variableName": "X"}.
+  2. The pod's environment — env vars come from `env:` (downward API, literals,
+     or secretKeyRef) and `envFrom:` (entire Secrets injected at once).
+
+The recommended pattern: leave `config.json` referencing env-var names, then
+inject those env vars on the pod via `env:` with `secretKeyRef`. No need for
+a custom aggregation Secret — Kubernetes does the composition natively.
+
+------------------------------------------------------------------------------
+Paste this into the base chart's values.yaml:
+------------------------------------------------------------------------------
+
+{{- if .Values.postgres.enabled }}
+config:
+  "@type": Postgres
+  host: {{ $name }}-pg-rw.{{ .Release.Namespace }}.svc.cluster.local
+  port: 5432
+  database: {{ .Values.postgres.database }}
+  user: {{ .Values.postgres.owner }}
+  password:
+    "@type": EnvironmentVariable
+    variableName: STALWART_DATA_PASSWORD
+{{- end }}
+
+env:
+{{- if .Values.postgres.enabled }}
+  - name: STALWART_DATA_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: {{ $name }}-pg-app
+        key: password
+{{- end }}
+{{- if and .Values.s3.enabled (eq .Values.s3.provider "garage") }}
+  - name: STALWART_BLOB_ACCESS_KEY
+    valueFrom:
+      secretKeyRef:
+        name: {{ .Values.s3.garage.accessKeySecret.name }}
+        key: {{ .Values.s3.garage.accessKeySecret.key }}
+  - name: STALWART_BLOB_SECRET_KEY
+    valueFrom:
+      secretKeyRef:
+        name: {{ .Values.s3.garage.secretKeySecret.name }}
+        key: {{ .Values.s3.garage.secretKeySecret.key }}
+{{- end }}
+
+------------------------------------------------------------------------------
+Bootstrapping non-storage settings (listeners, OIDC, DKIM, accounts)
+------------------------------------------------------------------------------
+
+In Stalwart 0.16+, only the data store lives in config.json. Everything else
+(blob/FTS/in-memory backends, listeners, OIDC providers, DKIM signatures,
+accounts) is a JMAP object inside the data store, provisioned via
+`stalwart-cli apply` against the management endpoint.
+
+This chart does not yet automate that step. On first install:
+
+  1. Set `recoveryAdmin.enabled: true` on the base chart and provide
+     STALWART_RECOVERY_ADMIN=admin:tempPassword via envFrom or secrets.env.
+  2. Wait for the pod to come up.
+  3. Port-forward and run stalwart-cli apply with your declarative plan:
+
+       kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $name }} 8080:8080
+       STALWART_URL=http://127.0.0.1:8080 \
+       STALWART_USER=admin \
+       STALWART_PASSWORD=tempPassword \
+       stalwart-cli apply --file plan.json
+
+  4. Provision a real admin Principal in the plan, then disable recovery mode.
+
+See https://stalw.art/docs/management/cli/apply for the plan format.

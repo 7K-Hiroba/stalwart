@@ -1,0 +1,146 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "app.fullname" . }}
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  serviceName: {{ include "app.fullname" . }}-headless
+  podManagementPolicy: {{ .Values.podManagementPolicy }}
+  # ordinals.start: 1 makes POD_INDEX 1-based — matches the 1-based cluster
+  # node-id Stalwart uses internally and avoids the "node 0" convention which
+  # the registry treats as "unset".
+  ordinals:
+    start: 1
+  {{- with .Values.updateStrategy }}
+  updateStrategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "app.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        # Roll the pod when config.json or self-managed env Secret content changes.
+        config-hash: {{ include (print $.Template.BasePath "/secret-config.yaml") . | sha256sum }}
+        env-hash: {{ include (print $.Template.BasePath "/secret-env.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "app.labels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "app.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            {{- range $name, $port := .Values.service.ports }}
+            - name: {{ $name }}
+              containerPort: {{ $port }}
+              protocol: TCP
+            {{- end }}
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            # POD_INDEX (StatefulSet ordinal, 1-based per ordinals.start) — used
+            # as cluster node identity in HA setups. Always exposed for
+            # convenience; downstream values can reference $(POD_INDEX).
+            - name: POD_INDEX
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['apps.kubernetes.io/pod-index']
+            # Stable per-pod DNS — required for cluster peers to find each
+            # other. Stalwart honors STALWART_HOSTNAME (registry/local.rs:20).
+            - name: STALWART_HOSTNAME
+              value: "$(POD_NAME).{{ include "app.fullname" . }}-headless"
+            {{- if .Values.recoveryAdmin.enabled }}
+            # First-time bootstrap. Pair with STALWART_RECOVERY_ADMIN
+            # (`user:password` string) sourced from secrets.env or envFrom.
+            # Disable once a real admin Principal has been provisioned.
+            - name: STALWART_RECOVERY_MODE
+              value: "1"
+            {{- end }}
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- $envFrom := list }}
+          {{- if .Values.secrets.create }}
+          {{- $envFrom = append $envFrom (dict "secretRef" (dict "name" (printf "%s-env" (include "app.fullname" .)))) }}
+          {{- end }}
+          {{- $envFrom = concat $envFrom .Values.envFrom }}
+          {{- with $envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- $mounts := list (dict "name" "config" "mountPath" "/etc/stalwart/config.json" "subPath" "config.json" "readOnly" true) }}
+          {{- if .Values.persistence.data.enabled }}
+          {{- $mounts = append $mounts (dict "name" "data" "mountPath" "/var/lib/stalwart") }}
+          {{- end }}
+          {{- $mounts = append $mounts (dict "name" "tmp" "mountPath" "/tmp") }}
+          {{- $mounts = concat $mounts .Values.extraVolumeMounts }}
+          volumeMounts:
+            {{- toYaml $mounts | nindent 12 }}
+      {{- $volumes := list (dict "name" "config" "secret" (dict "secretName" (printf "%s-config" (include "app.fullname" .)))) }}
+      {{- $volumes = append $volumes (dict "name" "tmp" "emptyDir" dict) }}
+      {{- $volumes = concat $volumes .Values.extraVolumes }}
+      volumes:
+        {{- toYaml $volumes | nindent 8 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- if .Values.persistence.data.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "app.labels" . | nindent 10 }}
+          app.kubernetes.io/component: data
+        {{- with .Values.persistence.data.annotations }}
+        annotations:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      spec:
+        accessModes:
+          - {{ .Values.persistence.data.accessMode }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.data.size }}
+        {{- with .Values.persistence.data.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+  {{- end }}

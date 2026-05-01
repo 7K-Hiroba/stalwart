@@ -1,0 +1,29 @@
+{{- if .Values.headlessService.enabled }}
+{{/*
+Headless Service for StatefulSet identity. Provides stable DNS per pod
+(<fullname>-N.<fullname>-headless.<ns>.svc.cluster.local). Required by
+StatefulSet.serviceName; cluster members use it for peer discovery.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "app.fullname" . }}-headless
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+  {{- with .Values.headlessService.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+    {{- range $name, $port := .Values.service.ports }}
+    - name: {{ $name }}
+      port: {{ $port }}
+      targetPort: {{ $name }}
+      protocol: TCP
+    {{- end }}
+  selector:
+    {{- include "app.selectorLabels" . | nindent 4 }}
+{{- end }}
