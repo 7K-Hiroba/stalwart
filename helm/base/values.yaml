@@ -222,6 +222,30 @@ secrets:
 recoveryAdmin:
   enabled: false
 
+# NATS coordinator wiring. Stalwart's `Coordinator` is a JMAP object inside
+# the runtime DB (not config.json), but the *credentials* it references must
+# be reachable as env vars on the pod. When `nats.enabled: true`, this chart
+# injects `STALWART_NATS_URL` (literal) and `STALWART_NATS_TOKEN` (from a
+# Secret) into the container so the apply-plan can use:
+#
+#   {"@type": "Nats",
+#    "addresses": ["nats://..."],
+#    "authSecret": {"@type": "EnvironmentVariable",
+#                    "variableName": "STALWART_NATS_TOKEN"}}
+#
+# Provisioning the NATS server itself is the platform chart's job (see
+# `nats.enabled` over there). Setting the Coordinator object is still a
+# manual `stalwart-cli apply` step — see README for the plan fragment.
+nats:
+  enabled: false
+  # -- NATS client URL (e.g. nats://stalwart-nats.stalwart.svc.cluster.local:4222).
+  # Injected as STALWART_NATS_URL.
+  url: ""
+  # -- Secret reference for token-based NATS auth. Leave empty to skip auth.
+  authSecret:
+    name: ""
+    key: token
+
 nodeSelector: {}
 tolerations: []
 affinity: {}

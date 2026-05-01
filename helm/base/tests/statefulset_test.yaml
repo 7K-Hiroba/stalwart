@@ -282,6 +282,59 @@ tests:
       - isNotNull:
           path: spec.template.metadata.annotations.config-hash
 
+  - it: omits NATS env vars by default
+    template: templates/statefulset.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: STALWART_NATS_URL
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: STALWART_NATS_TOKEN
+
+  - it: injects STALWART_NATS_URL when nats.enabled with a url
+    template: templates/statefulset.yaml
+    set:
+      nats.enabled: true
+      nats.url: nats://stalwart-nats.stalwart.svc.cluster.local:4222
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: STALWART_NATS_URL
+            value: nats://stalwart-nats.stalwart.svc.cluster.local:4222
+
+  - it: wires STALWART_NATS_TOKEN from authSecret when provided
+    template: templates/statefulset.yaml
+    set:
+      nats.enabled: true
+      nats.url: nats://stalwart-nats:4222
+      nats.authSecret:
+        name: nats-auth
+        key: token
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: STALWART_NATS_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: nats-auth
+                key: token
+
+  - it: skips STALWART_NATS_TOKEN when authSecret.name is empty
+    template: templates/statefulset.yaml
+    set:
+      nats.enabled: true
+      nats.url: nats://stalwart-nats:4222
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: STALWART_NATS_TOKEN
+
   - it: probes hit the http port on healthz endpoints
     template: templates/statefulset.yaml
     asserts:

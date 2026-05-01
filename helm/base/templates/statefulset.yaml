@@ -86,6 +86,20 @@ spec:
             - name: STALWART_RECOVERY_MODE
               value: "1"
             {{- end }}
+            {{- if .Values.nats.enabled }}
+            # NATS coordinator wiring. The Coordinator JMAP object inside the
+            # runtime DB references these env vars via {"@type": "Environment-
+            # Variable", "variableName": "STALWART_NATS_TOKEN"}.
+            - name: STALWART_NATS_URL
+              value: {{ .Values.nats.url | quote }}
+            {{- if .Values.nats.authSecret.name }}
+            - name: STALWART_NATS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.nats.authSecret.name }}
+                  key: {{ .Values.nats.authSecret.key }}
+            {{- end }}
+            {{- end }}
             {{- with .Values.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

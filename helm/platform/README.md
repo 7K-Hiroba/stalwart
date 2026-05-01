@@ -34,6 +34,7 @@ The chart fails fast at template-render time if you enable a feature whose CRDs 
 |---|---|
 | `Cluster` (CNPG) | Optional — PostgreSQL data store backend |
 | Crossplane `Bucket` / Garage `ConfigMap` + Job | Optional — S3 blob store backend |
+| NATS `StatefulSet` + Services + ConfigMap | Optional — `Coordinator` JMAP backend for HA |
 | `ExternalSecret` | Optional — sources Stalwart's admin/DB/S3/encryption credentials |
 | `ServiceMonitor` | Optional — scrapes `/metrics` on the workload's HTTP port |
 | Grafana dashboard | Optional — `ConfigMap` with the sidecar discovery label |
@@ -50,6 +51,23 @@ The chart is split so that **workload-lifecycle** resources (StatefulSet, HPA, P
 `helm install` prints a `NOTES.txt` block with the exact `values.yaml` snippet to paste into the base chart, parameterised with the right Secret names. Run `helm get notes <release>` to retrieve it later.
 
 The pattern: the base chart's `config.json` references env-var names inline (`{"@type": "EnvironmentVariable", "variableName": "X"}`), and the base chart's `env:` array injects those vars from the Secrets this chart provisions (CNPG-managed PG creds, the Garage access/secret-key Secrets, etc.). No aggregation Secret is needed — Kubernetes does the composition natively.
+
+### NATS coordinator (optional, HA only)
+
+For HA deployments, Stalwart needs a `Coordinator` for cluster pub/sub. This chart can provision a minimal NATS server inline (not a subchart — matches the rest of the platform pattern):
+
+```yaml
+nats:
+  enabled: true
+  replicas: 3            # 1 for single-node, 3+ for clustered routes
+  auth:
+    enabled: true        # turn on for shared clusters
+    token: changeme      # or set existingSecret to point at an externally-managed Secret
+```
+
+The base chart consumes the resulting endpoint via `STALWART_NATS_URL` and `STALWART_NATS_TOKEN` env vars (set `nats.enabled: true` over there too). The actual `Coordinator` JMAP object that ties them together is still applied via `stalwart-cli apply` — `NOTES.txt` prints a ready-to-paste fragment.
+
+Alternative: if you already run Redis as Stalwart's in-memory store, set `Coordinator: Default` in your apply-plan instead and skip NATS entirely — Stalwart will reuse the Redis connection for coordination.
 
 ## Bootstrapping non-storage settings (Stalwart 0.16+)
 

@@ -15,6 +15,13 @@ Resources provisioned:
     Secret key Secret:   {{ .Values.s3.garage.secretKeySecret.name }}/{{ .Values.s3.garage.secretKeySecret.key }}
 {{- end }}
 {{- end }}
+{{- if .Values.nats.enabled }}
+  - NATS coordinator: {{ $name }}-nats ({{ .Values.nats.replicas }} replica{{ if gt (int .Values.nats.replicas) 1 }}s, clustered{{ end }})
+    Client endpoint:  nats://{{ $name }}-nats.{{ .Release.Namespace }}.svc.cluster.local:4222
+{{- if .Values.nats.auth.enabled }}
+    Auth Secret:      {{ .Values.nats.auth.existingSecret | default (printf "%s-nats" $name) }}/{{ .Values.nats.auth.tokenKey }}
+{{- end }}
+{{- end }}
 {{- if .Values.externalSecrets.enabled }}
   - ExternalSecret: {{ $name }}  (target Secret: {{ $name }})
 {{- end }}
@@ -48,6 +55,17 @@ config:
   password:
     "@type": EnvironmentVariable
     variableName: STALWART_DATA_PASSWORD
+{{- end }}
+
+{{- if .Values.nats.enabled }}
+nats:
+  enabled: true
+  url: nats://{{ $name }}-nats.{{ .Release.Namespace }}.svc.cluster.local:4222
+{{- if .Values.nats.auth.enabled }}
+  authSecret:
+    name: {{ .Values.nats.auth.existingSecret | default (printf "%s-nats" $name) }}
+    key: {{ .Values.nats.auth.tokenKey }}
+{{- end }}
 {{- end }}
 
 env:
@@ -96,3 +114,32 @@ This chart does not yet automate that step. On first install:
   4. Provision a real admin Principal in the plan, then disable recovery mode.
 
 See https://stalw.art/docs/management/cli/apply for the plan format.
+
+{{- if .Values.nats.enabled }}
+
+------------------------------------------------------------------------------
+NATS coordinator — apply-plan fragment
+------------------------------------------------------------------------------
+
+The Coordinator JMAP object is DB-resident in Stalwart 0.16+, so it gets
+provisioned via the same `stalwart-cli apply` step. Add this object to your
+plan to switch the cluster pub/sub backend to NATS:
+
+  {
+    "@type": "Coordinator",
+    "id": "default",
+    "object": {
+      "@type": "Nats",
+      "addresses": ["nats://{{ $name }}-nats.{{ .Release.Namespace }}.svc.cluster.local:4222"]
+{{- if .Values.nats.auth.enabled }},
+      "authSecret": {
+        "@type": "EnvironmentVariable",
+        "variableName": "STALWART_NATS_TOKEN"
+      }
+{{- end }}
+    }
+  }
+
+The Stalwart pod's STALWART_NATS_TOKEN env var is wired automatically by the
+base chart when `nats.enabled: true`. The address above resolves in-cluster.
+{{- end }}

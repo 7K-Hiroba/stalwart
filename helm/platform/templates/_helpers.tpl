@@ -16,6 +16,25 @@ app.kubernetes.io/part-of: hiroba
 {{- end }}
 
 {{/*
+Labels for the chart-managed NATS coordinator workload.
+
+Distinct from `platform.labels` so the StatefulSet selector can target NATS
+pods specifically (the umbrella `component: platform` would also match every
+other chart-emitted resource).
+*/}}
+{{- define "platform.natsLabels" -}}
+app.kubernetes.io/name: {{ include "platform.name" . }}
+app.kubernetes.io/component: nats
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+app.kubernetes.io/part-of: hiroba
+{{- end }}
+
+{{- define "platform.natsSelectorLabels" -}}
+app.kubernetes.io/name: {{ include "platform.name" . }}
+app.kubernetes.io/component: nats
+{{- end }}
+
+{{/*
 Selector labels for matching base chart workload pods.
 
 Targets resources created by the base chart Helm release. Set

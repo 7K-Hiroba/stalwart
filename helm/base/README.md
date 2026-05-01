@@ -70,6 +70,21 @@ env:
 
 The companion platform chart prints a ready-to-paste version of this block in its install `NOTES.txt`.
 
+### HA / clustered deployments
+
+The StatefulSet is HA-shaped (1-based ordinals, headless DNS, downward-API `POD_INDEX`/`STALWART_HOSTNAME`), but Stalwart 0.16+ requires a few external pieces for multi-pod operation:
+
+- A **shared data store** (PostgreSQL, MySQL — not embedded RocksDB).
+- A **shared in-memory store** (Redis — for rate limiters, sessions, locks).
+- A **coordinator** for cluster pub/sub (NATS, Redis, Kafka, or "Default" reusing the Redis in-memory store). The upstream image only ships Redis and NATS.
+
+For NATS specifically, `nats.enabled: true` injects:
+
+- `STALWART_NATS_URL` (literal) from `nats.url`
+- `STALWART_NATS_TOKEN` (from `nats.authSecret.{name,key}`, if set)
+
+The Coordinator JMAP object that uses these env vars is applied through `stalwart-cli apply` — see the platform chart's `NOTES.txt` for the plan fragment. The platform chart can also provision the NATS server itself (`nats.enabled: true` over there).
+
 ### Bootstrapping the rest (NOT yet automated)
 
 This chart does not yet automate `stalwart-cli apply`. On first install, do it manually:
