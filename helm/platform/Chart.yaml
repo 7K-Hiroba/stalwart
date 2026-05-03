@@ -3,7 +3,7 @@ name: stalwart-platform
 description: Platform dependencies for Stalwart — provisions PostgreSQL, S3 blob
   storage, secrets, and observability
 type: application
-version: 1.0.0
+version: 1.0.1
 appVersion: "v0.16.1"
 maintainers:
   - name: 7k-hiroba
