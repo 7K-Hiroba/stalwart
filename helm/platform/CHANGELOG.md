@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0 (2026-05-03)
+
+## What's Changed
+* feat: allow dynamic config provision and ha by @joaodss2 in https://github.com/7K-Hiroba/stalwart/pull/11
+
+
+**Full Changelog**: https://github.com/7K-Hiroba/stalwart/compare/helm-platform-v1.0.1...helm-platform-v1.1.0
+
 ## 1.0.1 (2026-05-03)
 
 ## What's Changed
