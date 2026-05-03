@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
-  "required": ["replicaCount", "image", "service"],
+  "required": ["replicaCount", "image", "service", "config"],
   "properties": {
     "replicaCount": {
       "type": "integer",
@@ -68,13 +68,17 @@
         }
       }
     },
-    "strategy": {
+    "updateStrategy": {
       "type": "object",
       "properties": {
-        "type": { "type": "string", "enum": ["RollingUpdate", "Recreate"] },
+        "type": { "type": "string", "enum": ["RollingUpdate", "OnDelete"] },
         "rollingUpdate": { "type": "object" }
       },
       "additionalProperties": false
+    },
+    "podManagementPolicy": {
+      "type": "string",
+      "enum": ["OrderedReady", "Parallel"]
     },
     "service": {
       "type": "object",
@@ -99,6 +103,14 @@
           },
           "additionalProperties": { "type": "integer", "minimum": 1, "maximum": 65535 }
         }
+      },
+      "additionalProperties": false
+    },
+    "headlessService": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "annotations": { "type": "object" }
       },
       "additionalProperties": false
     },
@@ -199,8 +211,59 @@
     "persistence": {
       "type": "object",
       "properties": {
-        "config": { "$ref": "#/definitions/pvc" },
-        "data": { "$ref": "#/definitions/pvc" }
+        "data": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "size": { "type": "string", "pattern": "^[0-9]+(Mi|Gi|Ti)$" },
+            "storageClass": { "type": "string" },
+            "accessMode": { "type": "string", "enum": ["ReadWriteOnce", "ReadWriteMany", "ReadOnlyMany"] },
+            "annotations": { "type": "object" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "config": {
+      "type": "object",
+      "description": "Stalwart 0.16+ data store configuration. Rendered to /etc/stalwart/config.json. The @type discriminator selects the backend (RocksDb, Sqlite, Postgres, MySql, FoundationDb). Secret fields accept inline strings or {@type: EnvironmentVariable, variableName: ...}.",
+      "required": ["@type"],
+      "properties": {
+        "@type": { "type": "string" }
+      }
+    },
+    "secrets": {
+      "type": "object",
+      "properties": {
+        "create": { "type": "boolean" },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "nats": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "url": { "type": "string" },
+        "authSecret": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "key": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "recoveryAdmin": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
       },
       "additionalProperties": false
     },
@@ -212,18 +275,5 @@
     "extraVolumes": { "type": "array" },
     "extraVolumeMounts": { "type": "array" }
   },
-  "additionalProperties": false,
-  "definitions": {
-    "pvc": {
-      "type": "object",
-      "properties": {
-        "enabled": { "type": "boolean" },
-        "size": { "type": "string", "pattern": "^[0-9]+(Mi|Gi|Ti)$" },
-        "storageClass": { "type": "string" },
-        "accessMode": { "type": "string", "enum": ["ReadWriteOnce", "ReadWriteMany", "ReadOnlyMany"] },
-        "annotations": { "type": "object" }
-      },
-      "additionalProperties": false
-    }
-  }
+  "additionalProperties": false
 }

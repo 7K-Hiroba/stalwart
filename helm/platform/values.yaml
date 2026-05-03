@@ -89,6 +89,59 @@ s3:
     # -- Number of data/parity replicas in Garage
     replicationFactor: 3
 
+# -- NATS coordinator (Stalwart `Coordinator` JMAP object backend).
+# Stalwart 0.16+ stores cluster pub/sub coordination state in NATS, Redis,
+# Kafka, or Zenoh. NATS is one option among several; the upstream Stalwart
+# image is also compiled with Redis support, so users who already run Redis
+# as the in-memory store can pick `Coordinator: Default` and skip this block.
+#
+# This chart provisions a minimal NATS server (no JetStream — the coordinator
+# only needs core pub/sub) using inline manifests. Use `replicas: 3` for HA;
+# the StatefulSet wires the cluster routes automatically.
+#
+# The base chart consumes this through env vars (STALWART_NATS_URL,
+# STALWART_NATS_TOKEN). The Coordinator JMAP object itself must be applied
+# via `stalwart-cli apply` — see the install NOTES.txt for a sample plan.
+nats:
+  enabled: false
+  # -- Replica count. Set to 1 for single-node, 3+ for HA (clustered routes).
+  replicas: 1
+  image:
+    repository: docker.io/library/nats
+    pullPolicy: IfNotPresent
+    # -- Image tag (NATS server version). Pinned to a recent stable release.
+    tag: "2.10-alpine"
+  # -- Pod resources. The coordinator workload is light (pub/sub, no JetStream).
+  resources:
+    limits:
+      cpu: "500m"
+      memory: 256Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+  storage:
+    # NATS coordinator state is in-memory; no PVC is needed unless JetStream is
+    # enabled (which this chart does not). Left here for future extension.
+    enabled: false
+    size: 1Gi
+    storageClass: ""
+  # -- Token-based auth. When enabled, NATS requires the token on every client
+  # connection; the Stalwart pod's STALWART_NATS_TOKEN env var carries it.
+  # Defaults to off for in-cluster traffic; turn on for shared clusters.
+  auth:
+    enabled: false
+    # -- Reference to an existing Secret containing the token. Leave blank to
+    # let the chart create one (token value via `auth.token`). When using
+    # ExternalSecrets / SealedSecrets, set existingSecret and ignore `token`.
+    existingSecret: ""
+    tokenKey: token
+    # -- Plain token written into a chart-managed Secret. Override in production
+    # — the default is a placeholder, not a generated random.
+    token: "change-me-please"
+  # -- ServiceMonitor exposure for the NATS /healthz and stats endpoints.
+  metrics:
+    enabled: false
+
 # -- External Secrets (external-secrets.io)
 externalSecrets:
   enabled: false
@@ -98,19 +151,19 @@ externalSecrets:
   storeRef:
     name: cluster-secret-store
     kind: ClusterSecretStore
-  # -- Individual secret mappings. Stalwart typically needs the admin
-  # password, DB credentials, S3 access keys, and DKIM/encryption keys.
+  # -- Individual secret mappings. Key names align with the EnvironmentVariable
+  # references the base chart's config.json uses. Reference this Secret from
+  # the base chart via `envFrom: [{ secretRef: { name: <release>-stalwart } }]`.
   data: []
-  #  - secretKey: STALWART_ADMIN_PASSWORD
-  #    remoteKey: stalwart/admin
-  #    property: password
-  #  - secretKey: STALWART_STORE_DB_PASSWORD
+  #  - secretKey: STALWART_RECOVERY_ADMIN     # user:password — first-install only
+  #    remoteKey: stalwart/recovery-admin
+  #  - secretKey: STALWART_DATA_PASSWORD      # referenced by config.json
   #    remoteKey: stalwart/postgres
   #    property: password
-  #  - secretKey: STALWART_STORE_BLOB_ACCESS_KEY
+  #  - secretKey: STALWART_BLOB_ACCESS_KEY    # for S3 blob backend (provisioned via apply)
   #    remoteKey: stalwart/s3
   #    property: accessKey
-  #  - secretKey: STALWART_STORE_BLOB_SECRET_KEY
+  #  - secretKey: STALWART_BLOB_SECRET_KEY
   #    remoteKey: stalwart/s3
   #    property: secretKey
   # -- Pull all keys from a remote path

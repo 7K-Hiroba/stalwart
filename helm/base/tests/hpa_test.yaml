@@ -24,10 +24,10 @@ tests:
           path: spec.maxReplicas
           value: 5
 
-  - it: targets the deployment
+  - it: targets the StatefulSet
     set:
       autoscaling.enabled: true
     asserts:
       - equal:
           path: spec.scaleTargetRef.kind
-          value: Deployment
+          value: StatefulSet
