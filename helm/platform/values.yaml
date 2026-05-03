@@ -110,7 +110,7 @@ nats:
     repository: docker.io/library/nats
     pullPolicy: IfNotPresent
     # -- Image tag (NATS server version). Pinned to a recent stable release.
-    tag: "2.10-alpine"
+    tag: "2.14-alpine"
   # -- Pod resources. The coordinator workload is light (pub/sub, no JetStream).
   resources:
     limits:
